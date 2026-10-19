@@ -123,13 +123,62 @@ llm-model: deepseek/deepseek-chat
 # GitHub-hosted models (no extra key — uses the workflow token)
 llm-model: github/gpt-4o-mini
 
-# Self-hosted — the reason prsentinel exists
+# A model server you run yourself
 llm-model: ollama/qwen2.5-coder
 llm-base-url: http://your-gpu-host:11434/v1
 ```
 
-Because `ollama` and `vllm` are OpenAI-compatible, you can run prsentinel
-against a model on your own hardware and send **no code to a third party**.
+Because `ollama` and `vllm` are OpenAI-compatible, prsentinel can talk to a
+model on your own hardware — the model stays warm, and you can use something
+much larger than a runner could hold. prsentinel is the *bot*; the model is
+something you point it at.
+
+`llm-model` is a workflow input. In `.prsentinel.yaml` the equivalent is
+`models.review`, and the config file wins; prsentinel warns when the two
+disagree.
+
+## Local models (no key, no third party)
+
+Prefix a model with `local/` and prsentinel downloads a GGUF and runs it **on
+the Actions runner**, inside the action container:
+
+```yaml
+- uses: vvamzy/prsentinel@main
+  with:
+    llm-model: local/qwen2.5-coder-7b-instruct
+```
+
+Nothing is sent to a third party, and `llm-api-key` is not required.
+
+| Model | Size | Notes |
+|---|---|---|
+| `local/qwen2.5-coder-7b-instruct` | ~4.4 GB | Default. Best quality that fits the free runner. |
+| `local/qwen2.5-coder-3b-instruct` | ~2.0 GB | 2–3× faster, noticeably weaker. |
+| `local/qwen2.5-coder-1.5b-instruct` | ~1.0 GB | Fastest. Expect noise. |
+
+> **Read this before choosing it.** A free GitHub-hosted runner is 4 vCPU with
+> no GPU, so a 7B model generates a few tokens per second and a whole review can
+> take 5–10 minutes. On quality it is plainly below `gpt-4o-mini`, which costs
+> about $0.15 per million input tokens. Use it when *privacy or zero cost*
+> matters more than speed and precision — not as a default.
+
+Weights are cached and checksummed; a killed job never leaves a half-download
+that a later run trusts. To keep them between runs, point `local-model-cache` at
+an `actions/cache` directory:
+
+```yaml
+- uses: actions/cache@v4
+  with:
+    path: .prsentinel/models
+    key: prsentinel-model-${{ hashFiles('.prsentinel.yaml') }}
+- uses: vvamzy/prsentinel@main
+  with:
+    llm-model: local/qwen2.5-coder-7b-instruct
+    local-model-cache: .prsentinel/models
+```
+
+See [ROADMAP.md](ROADMAP.md) for the alternative — a warm server on your own
+hardware — and why it is not the bundled default.
 
 ## Commands
 
@@ -228,9 +277,10 @@ See [docs/configuration.md](docs/configuration.md) for the full reference.
 | `app-id` | — | GitHub App id. With `app-private-key`, posts as `<app>[bot]`. |
 | `app-private-key` | — | GitHub App private key. PEM, `\n`-escaped PEM, or base64 PEM. Use a secret. |
 | `installation-id` | auto | App installation id. Discovered from the repository when omitted. |
-| `llm-api-key` | — | API key. Falls back to `LLM_API_KEY` / `OPENAI_API_KEY`. |
-| `llm-model` | `openai/gpt-4o-mini` | Model id. |
+| `llm-api-key` | — | API key. Falls back to `LLM_API_KEY` / `OPENAI_API_KEY`. Not needed for a `local/…` model. |
+| `llm-model` | `openai/gpt-4o-mini` | Model id, e.g. `openai/gpt-4o-mini` or `local/qwen2.5-coder-7b-instruct`. Overridden by `models.review`. |
 | `llm-base-url` | — | Override the API base URL. |
+| `local-model-cache` | `.prsentinel/models` | Where downloaded local model weights are kept. |
 | `pr-number` | auto | Pull request number. |
 | `config-path` | `.` | Where to look for `.prsentinel.yaml`. |
 | `dry-run` | `false` | Write the payload to `out/` instead of posting. |

@@ -170,7 +170,12 @@ on polyglot repos. Empty means "infer it".
 
 ### `review`
 Model id for the review pipeline. Overrides the `llm-model` Action input when
-set.
+set, and prsentinel warns when the two disagree so an override is never silent.
+
+Besides the hosted providers, `local/<id>` runs a bundled GGUF on the runner —
+see [Local models](../README.md#local-models-no-key-no-third-party). The default
+7B model needs no key, but a free runner is 4 vCPU with no GPU, so a review
+takes minutes rather than seconds.
 
 ### `chat`
 Cheaper model for conversational follow-ups. Falls back to `review`.

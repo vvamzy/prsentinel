@@ -21,14 +21,16 @@ inputs:
     description: 'App installation id. Discovered from the repository automatically when omitted.'
     required: false
   llm-api-key:
-    description: 'API key for the LLM provider. Falls back to LLM_API_KEY or OPENAI_API_KEY.'
+    description: 'API key for the LLM provider. Falls back to LLM_API_KEY or OPENAI_API_KEY. Not needed for a `local/…` model.'
     required: false
   llm-model:
-    description: 'Model id, e.g. "openai/gpt-4o-mini" or "anthropic/claude-sonnet".'
+    description: 'Model id, e.g. "openai/gpt-4o-mini", "anthropic/claude-sonnet", or "local/qwen2.5-coder-7b-instruct" to run a bundled model on the runner. Overridden by models.review in .prsentinel.yaml.'
     required: false
-    default: 'openai/gpt-4o-mini'
   llm-base-url:
     description: 'Override the API base URL (for Ollama, vLLM, OpenRouter, etc.).'
+    required: false
+  local-model-cache:
+    description: 'Where to keep downloaded local model weights. Point it at an actions/cache directory to survive between runs.'
     required: false
   pr-number:
     description: 'Pull request number. Auto-detected from the event payload.'

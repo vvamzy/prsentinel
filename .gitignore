@@ -9,3 +9,6 @@ dist/
 # dry-run output
 out/
 .prsentinel-out/
+
+# downloaded local model weights (llm-model: local/…)
+.prsentinel/
