@@ -33,7 +33,25 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
 
+      # Dogfooding is optional. A fork, or this repository before a key is
+      # configured, has no secret — and prsentinel deliberately fails loudly
+      # rather than reviewing with no model. Step aside instead of going red,
+      # so a missing secret does not look like a broken change.
+      # The secret is scoped to this one step rather than the whole job.
+      - name: Check for an LLM key
+        id: gate
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          if [ -n "$LLM_API_KEY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Self-review skipped::Set the LLM_API_KEY secret to have prsentinel review this repository's own pull requests."
+          fi
+
       - name: Run prsentinel
+        if: steps.gate.outputs.enabled == 'true'
         uses: ./
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
