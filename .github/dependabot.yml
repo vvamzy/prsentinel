@@ -1,0 +1,21 @@
+version: 2
+
+updates:
+  # The actions pinned in .github/workflows sat three majors behind (v4 while v7
+  # was current) and nobody noticed until "Node.js 20 is deprecated" appeared on
+  # every run. This keeps that from happening again.
+  - package-ecosystem: github-actions
+    directory: /
+    # Pull requests land on the integration branch, like every other change.
+    target-branch: dev
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+    # One PR for all action bumps rather than one per action. CI validates the
+    # bump, so a major version is safe to review like any other change.
+    groups:
+      github-actions:
+        patterns:
+          - '*'
