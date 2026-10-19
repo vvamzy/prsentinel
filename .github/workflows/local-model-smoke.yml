@@ -28,6 +28,13 @@ on:
         description: llama.cpp threads. A free public runner has 4 vCPU.
         required: false
         default: '4'
+      max-files:
+        description: >-
+          Cap on files analysed. A local model is serialized on a single slot and
+          takes minutes per file, so keep this small; raise it (and the timeout)
+          only when you mean to measure a whole pull request.
+        required: false
+        default: '3'
 
 permissions:
   contents: read
@@ -61,11 +68,15 @@ jobs:
           key: local-model-${{ inputs.model }}
 
       # models.review in .prsentinel.yaml outranks the llm-model input, and this
-      # repository's own config pins a cloud model.
+      # repository's own config pins a cloud model; max_files is capped so the
+      # run stays inside the job timeout. A local model is served one request at
+      # a time and takes minutes per file, so a 14-file pull request is not a
+      # smoke test, it is an hour.
       - name: Point the config at the local model
         run: |
           sed -i "s|^\([[:space:]]*review:\).*|\1 ${{ inputs.model }}|" .prsentinel.yaml
-          grep -n "review:" .prsentinel.yaml
+          sed -i "s|^\([[:space:]]*max_files:\).*|\1 ${{ inputs.max-files }}|" .prsentinel.yaml
+          grep -n -e "review:" -e "max_files:" .prsentinel.yaml
 
       # Runs the published image by hand with the same runtime contract the
       # platform gives a container action: inputs as environment variables, a
@@ -104,25 +115,46 @@ jobs:
             echo "| Model | \`${{ inputs.model }}\` |"
             echo "| Image tag | \`${{ inputs.image-tag }}\` |"
             echo "| Threads | ${{ inputs.threads }} |"
+            echo "| Max files | ${{ inputs.max-files }} |"
             echo "| Wall clock | ${elapsed}s |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       # A payload on disk is the point of the run: it proves the model produced
       # a parseable review rather than an empty or garbled response.
       - name: Report the review payload
+        if: always()
         run: |
           set -euo pipefail
-          payload=$(ls out/*.json | head -n 1)
+          payload=$(ls out/*.json 2>/dev/null | head -n 1 || true)
+          if [ -z "$payload" ]; then
+            echo "::error::the run wrote no review payload"
+            exit 1
+          fi
           {
             echo
             echo "#### \`${payload}\`"
             PAYLOAD="$payload" node --input-type=module -e '
               import { readFileSync } from "node:fs";
               const p = JSON.parse(readFileSync(process.env.PAYLOAD, "utf8"));
+              const files = new Set(p.comments.map((c) => c.path));
               console.log(`- inline comments: ${p.comments.length}`);
+              console.log(`- files with comments: ${files.size}`);
               console.log(`- walkthrough characters: ${p.body.trim().length}`);
             '
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # A green run is only meaningful if it means the review actually happened.
+      # The first local run went green while 12 of 14 map calls had died of a
+      # client timeout and been skipped, so assert on the degradation the
+      # pipeline logs rather than on the exit status.
+      - name: Fail if the model dropped work
+        run: |
+          pattern='map: analysis failed|map: no structured output|Reduce phase failed'
+          if grep -qE "$pattern" smoke.log; then
+            grep -nE "$pattern" smoke.log
+            echo "::error::the local model dropped work; see smoke.log"
+            exit 1
+          fi
 
       - name: Upload the payload and log
         if: always()
