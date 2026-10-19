@@ -24,7 +24,7 @@
     "lint": "tsc --noEmit"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "@actions/core": "^1.11.1",
