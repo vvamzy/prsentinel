@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build bundle
+        run: npm run build
+
+      - name: Verify the bundle runs
+        run: node dist/index.js
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+  guard:
+    name: pull_request_target safety guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if a pull_request_target workflow checks out the PR head
+        run: node scripts/check-pr-target-safety.mjs

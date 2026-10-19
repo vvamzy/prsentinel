@@ -1,0 +1,41 @@
+name: prsentinel self-review
+
+# Dogfooding: prsentinel reviews its own pull requests.
+#
+# SECURITY NOTE
+# We use pull_request_target so the workflow gets a write-scoped token and can
+# post the review. That event runs in the context of the BASE branch, and we
+# deliberately check out the base ref — never the PR head. prsentinel reads the
+# diff as data through the API; it never executes code from the PR.
+# `.github/workflows/ci.yml` runs a guard that fails the build if this ever
+# changes.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: prsentinel-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Skip draft PRs handled by config; run only for same-repo and fork PRs.
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the base branch (never the PR head)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Run prsentinel
+        uses: ./
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          llm-api-key: ${{ secrets.LLM_API_KEY }}
+          llm-model: ${{ vars.PRSENTINEL_MODEL || 'openai/gpt-4o-mini' }}

@@ -1,0 +1,30 @@
+# .prsentinel.yaml — configuration for prsentinel itself (dogfooding).
+#
+# This file is used when prsentinel reviews its own pull requests.
+# Every field is optional; delete this file and the defaults still apply.
+
+effort: 3
+
+reviews:
+  drafts: false
+  max_files: 40
+  max_comments_per_file: 5
+  max_comments_per_pr: 20
+  confidence_threshold: 0.6
+  incremental: true
+  request_changes_on_critical: false
+  # Build output is never worth an LLM token.
+  respect_linters: true
+  path_filters:
+    - "dist/**"
+    - "node_modules/**"
+    - "**/*.lock"
+    - "**/package-lock.json"
+
+language: typescript
+
+models:
+  review: openai/gpt-4o-mini
+  chat: openai/gpt-4o-mini
+
+comment_prefix: '**{{severity}}** · `{{category}}` · {{title}}'

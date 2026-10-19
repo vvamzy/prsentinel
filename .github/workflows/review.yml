@@ -1,0 +1,54 @@
+name: Reusable prsentinel review
+
+# A reusable workflow other repositories can call:
+#
+#   jobs:
+#     prsentinel:
+#       uses: your-org/prsentinel/.github/workflows/review.yml@v1
+#       secrets:
+#         llm-api-key: ${{ secrets.LLM_API_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      llm-model:
+        description: 'Model id, e.g. openai/gpt-4o-mini'
+        required: false
+        type: string
+        default: 'openai/gpt-4o-mini'
+      llm-base-url:
+        description: 'Override the LLM API base URL'
+        required: false
+        type: string
+        default: ''
+      config-path:
+        description: 'Path to the repo root containing .prsentinel.yaml'
+        required: false
+        type: string
+        default: '.'
+    secrets:
+      llm-api-key:
+        description: 'API key for the LLM provider'
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      # Always the base branch — never the PR head. See docs/SECURITY.md.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Run prsentinel
+        uses: ./
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          llm-api-key: ${{ secrets.llm-api-key }}
+          llm-model: ${{ inputs.llm-model }}
+          llm-base-url: ${{ inputs.llm-base-url }}
+          config-path: ${{ inputs.config-path }}

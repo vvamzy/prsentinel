@@ -1,0 +1,33 @@
+{
+  "title": "Add rate limiting to the payments API",
+  "body": "## Summary\nAdds a token-bucket rate limiter in front of the charge endpoint.\n\n## Notes\n- New dependency on a Redis client\n- Behaviour changes for callers that exceed the limit",
+  "number": 42,
+  "headSha": "abcdef1234567890abcdef1234567890abcdef12",
+  "baseSha": "1234567890abcdef1234567890abcdef12345678",
+  "files": [
+    {
+      "filename": "src/payments/charge.ts",
+      "status": "modified",
+      "changes": 12,
+      "patch": "@@ -1,8 +1,14 @@\n import { db } from '../db';\n import { ChargeRequest, ChargeResult } from './types';\n+import { rateLimit } from '../lib/rate-limit';\n \n export async function charge(req: ChargeRequest): Promise<ChargeResult> {\n+  // TODO: this should use the account id, not the IP\n+  const allowed = await rateLimit(req.ip);\n+  if (!allowed) {\n+    throw new Error('rate limited');\n+  }\n   const tx = await db.transactions.insert(req);\n-  return { id: tx.id, status: 'ok' };\n+  return { id: tx.id, status: tx.status };\n }"
+    },
+    {
+      "filename": "src/lib/rate-limit.ts",
+      "status": "added",
+      "changes": 18,
+      "patch": "@@ -0,0 +1,18 @@\n+import { redis } from '../redis';\n+\n+const LIMIT = 100;\n+const WINDOW_SECONDS = 60;\n+\n+export async function rateLimit(key: string): Promise<boolean> {\n+  const count = await redis.incr(`rl:${key}`);\n+  if (count === 1) {\n+    await redis.expire(`rl:${key}`, WINDOW_SECONDS);\n+  }\n+  console.log('rate limit check', key, count);\n+  return count <= LIMIT;\n+}"
+    },
+    {
+      "filename": "package-lock.json",
+      "status": "modified",
+      "changes": 900,
+      "patch": "@@ -1,3 +1,3 @@\n {\n-  \"lockfileVersion\": 2,\n+  \"lockfileVersion\": 3,\n }"
+    },
+    {
+      "filename": "docs/rate-limiting.md",
+      "status": "added",
+      "changes": 6,
+      "patch": "@@ -0,0 +1,6 @@\n+# Rate limiting\n+\n+The charge endpoint is limited to 100 requests per minute per caller.\n+\n+TODO: document the 429 response shape.\n"
+    }
+  ]
+}

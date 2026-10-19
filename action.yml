@@ -1,0 +1,48 @@
+name: 'PR Sentinel'
+description: 'Open-source AI code review for pull requests, running entirely inside GitHub Actions'
+author: 'prsentinel'
+
+branding:
+  icon: 'eye'
+  color: 'purple'
+
+inputs:
+  github-token:
+    description: 'GitHub token used to read the PR and post the review.'
+    required: true
+    default: ${{ github.token }}
+  llm-api-key:
+    description: 'API key for the LLM provider. Falls back to LLM_API_KEY or OPENAI_API_KEY.'
+    required: false
+  llm-model:
+    description: 'Model id, e.g. "openai/gpt-4o-mini" or "anthropic/claude-sonnet".'
+    required: false
+    default: 'openai/gpt-4o-mini'
+  llm-base-url:
+    description: 'Override the API base URL (for Ollama, vLLM, OpenRouter, etc.).'
+    required: false
+  pr-number:
+    description: 'Pull request number. Auto-detected from the event payload.'
+    required: false
+  config-path:
+    description: 'Path to the repository root containing .prsentinel.yaml.'
+    required: false
+    default: '.'
+  dry-run:
+    description: 'Write the review payload to out/ instead of posting it.'
+    required: false
+    default: 'false'
+
+outputs:
+  review-url:
+    description: 'HTML URL of the posted review (empty on dry run).'
+  payload-file:
+    description: 'Path to the written payload (dry run only).'
+  comment-count:
+    description: 'Number of inline comments in the review.'
+  finding-count:
+    description: 'Number of findings after filtering.'
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
