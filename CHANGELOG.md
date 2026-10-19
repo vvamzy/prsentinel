@@ -12,6 +12,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   with `node:crypto` (no new dependency); the private key is accepted as a PEM,
   a `\n`-escaped PEM, or base64; the installation id is discovered from the
   repository. `github-token` still works and is used when no App is configured.
+  `parseSlashCommand` now takes every identity at once, so `@your-app` keeps
+  matching under a custom App slug (a GitHub App is *logged* as `your-app[bot]`
+  but *mentioned* as `@your-app`), and a mention no longer matches a longer name
+  that merely starts with it.
+- **Reusable workflow accepts App secrets** (`app-id`, `app-private-key`,
+  `installation-id`), so other repositories can call it without a PAT.
 - **Slash commands** via `issue_comment`: `/review`, `/review all`,
   `/review <path>`, `/explain`, `/explain <path> <question>`, and
   `/generate-tests [path]`. Mentioning the bot (`@prsentinel …`) works too.

@@ -12,7 +12,7 @@ import { LLM } from './llm/registry.js';
 import { runReview } from './pipeline.js';
 import { getCommandHandler, commandHelp } from './commands/index.js';
 import { runChat } from './chat.js';
-import { parseSlashCommand, type KnownCommand } from './state.js';
+import { parseSlashCommand, mentionNames, type KnownCommand } from './state.js';
 import type { ReviewPayload } from './review/types.js';
 
 /**
@@ -195,7 +195,7 @@ async function runCommandFlow(
     return;
   }
 
-  const parsed = parseSlashCommand(comment.body, botLogins[0] ?? 'prsentinel');
+  const parsed = parseSlashCommand(comment.body, mentionNames(botLogins));
   if (!parsed) {
     log.info('No prsentinel command in comment; nothing to do.');
     return;
@@ -234,7 +234,7 @@ async function runCommandFlow(
     args: parsed.args,
     dryRun: env.dryRun,
     repoRoot: env.repoRoot,
-    botLogin: botLogins[0] ?? 'prsentinel',
+    botLogin: mentionNames(botLogins)[0] ?? 'prsentinel',
   });
 
   if (result.summary) log.info(result.summary);

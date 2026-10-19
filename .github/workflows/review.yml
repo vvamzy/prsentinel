@@ -30,6 +30,15 @@ on:
       llm-api-key:
         description: 'API key for the LLM provider'
         required: true
+      app-id:
+        description: 'GitHub App id (recommended). With app-private-key, posts as <app>[bot].'
+        required: false
+      app-private-key:
+        description: 'GitHub App private key (recommended). PEM, \n-escaped PEM, or base64 PEM.'
+        required: false
+      installation-id:
+        description: 'GitHub App installation id. Discovered from the repository when omitted.'
+        required: false
 
 permissions:
   contents: read
@@ -47,6 +56,10 @@ jobs:
       - name: Run prsentinel
         uses: ./
         with:
+          # The App wins when both are set; github-token is the fallback.
+          app-id: ${{ secrets.app-id }}
+          app-private-key: ${{ secrets.app-private-key }}
+          installation-id: ${{ secrets.installation-id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           llm-api-key: ${{ secrets.llm-api-key }}
           llm-model: ${{ inputs.llm-model }}

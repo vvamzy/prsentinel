@@ -54,13 +54,24 @@ export type KnownCommand = (typeof KNOWN_COMMANDS)[number];
  *
  * The trigger must be at the start of the text or preceded by whitespace, so
  * a `/` inside a URL never matches. Returns null when there is no trigger.
+ *
+ * `botLogin` accepts several names because an authenticated identity has more
+ * than one: a GitHub App is logged as `my-app[bot]` but is *mentioned* as
+ * `@my-app`. Pass every candidate.
  */
 export function parseSlashCommand(
   body: string,
-  botLogin: string,
+  botLogin: string | string[],
 ): { command: KnownCommand; args: string } | null {
-  const escaped = botLogin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const trigger = new RegExp(`(?:^|[\\s(])(?:@${escaped}|/)\\s*`, 'i');
+  const names = (Array.isArray(botLogin) ? botLogin : [botLogin])
+    .map((n) => n.trim())
+    .filter((n) => n !== '');
+  if (names.length === 0) return null;
+
+  const alternation = names.map(escapeRegExp).join('|');
+  // The trailing lookahead stops `@prsentinelx` from being read as a mention of
+  // `prsentinel`, and lets a longer name win over a shorter prefix of it.
+  const trigger = new RegExp(`(?:^|[\\s(])(?:@(?:${alternation})(?![\\w-])|/)\\s*`, 'i');
   const m = trigger.exec(body);
   if (!m) return null;
 
@@ -73,4 +84,29 @@ export function parseSlashCommand(
   }
   // A bare mention defaults to a full review, with the remainder as guidance.
   return { command: 'review', args: rest.trim() };
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * The `@mention` forms of our own identities.
+ *
+ * GitHub logs a GitHub App as `my-app[bot]` but users mention it as `@my-app`.
+ * Matching the raw login against a comment body never works, so every login is
+ * reduced to its mention form and de-duplicated.
+ */
+export function mentionNames(botLogins: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const login of botLogins) {
+    const name = login.replace(/\[bot\]$/i, '').trim();
+    if (name === '') continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
 }

@@ -94,9 +94,14 @@ export async function resolveAuth(
       `Authenticated as GitHub App${botLogin ? ` (${botLogin})` : ''}, installation ${installationId}.`,
     );
 
+    // A GitHub App is logged as `my-app[bot]` but mentioned as `@my-app`, so we
+    // carry both identities. `botLogins[0]` stays the real login because that is
+    // what appears as the author of existing reviews.
+    const mention = botLogin.endsWith('[bot]') ? botLogin.slice(0, -'[bot]'.length) : '';
+
     return {
       client: new GitHubClient(token, inputs.owner, inputs.repo),
-      botLogins: mergeBotLogins(botLogin, inputs.configuredBotLogins),
+      botLogins: mergeBotLogins(botLogin, [mention, ...inputs.configuredBotLogins]),
       mode: 'app',
     };
   }

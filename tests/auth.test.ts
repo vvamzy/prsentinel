@@ -8,6 +8,7 @@ import {
   type AppAuthorizer,
   type AuthInputs,
 } from '../src/github/auth.js';
+import { mentionNames } from '../src/state.js';
 
 function inputs(overrides: Partial<AuthInputs> = {}): AuthInputs {
   return {
@@ -99,6 +100,15 @@ describe('resolveAuth', () => {
     const res = await resolveAuth(inputs({ appId: '1', appPrivateKey: 'k' }), auth);
     expect(res.botLogins[0]).toBe('prsentinel[bot]');
     expect(res.botLogins).toContain('github-actions[bot]');
+  });
+
+  it('includes the mention form so @mentions keep working under a custom slug', async () => {
+    // Regression: an App is logged as `my-app[bot]` but mentioned as `@my-app`.
+    // Without the mention form, `@my-app explain ...` silently stops matching.
+    const { auth } = fakeAppAuth({ token: 't', botLogin: 'my-app[bot]', installationId: 7 });
+    const res = await resolveAuth(inputs({ appId: '1', appPrivateKey: 'k' }), auth);
+    expect(res.botLogins).toContain('my-app');
+    expect(mentionNames(res.botLogins)).toContain('my-app');
   });
 
   it('passes a pre-known installation id straight through', async () => {

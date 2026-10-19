@@ -4,6 +4,7 @@ import {
   extractLastReviewedSha,
   findLastReviewedSha,
   parseSlashCommand,
+  mentionNames,
 } from '../src/state.js';
 
 describe('markers', () => {
@@ -61,5 +62,53 @@ describe('parseSlashCommand', () => {
 
   it('returns null for ordinary comments', () => {
     expect(parseSlashCommand('lgtm', 'prsentinel')).toBeNull();
+  });
+
+  it('accepts several candidate names at once', () => {
+    const r = parseSlashCommand('@my-reviewer explain this', ['prsentinel', 'my-reviewer']);
+    expect(r?.command).toBe('explain');
+    expect(r?.args).toBe('this');
+  });
+
+  it('still finds the slash form when a name list is given', () => {
+    expect(parseSlashCommand('/review all', ['prsentinel', 'my-reviewer'])?.command).toBe('review');
+  });
+
+  it('returns null when the name list is empty', () => {
+    expect(parseSlashCommand('@prsentinel review', [])).toBeNull();
+    expect(parseSlashCommand('@prsentinel review', '')).toBeNull();
+  });
+
+  it('does not match a name that is only a prefix of the mention', () => {
+    // `@prsentinelx` must not be read as a mention of `prsentinel`.
+    expect(parseSlashCommand('@prsentinelx review', 'prsentinel')?.command).not.toBe('review');
+  });
+});
+
+describe('mentionNames', () => {
+  it('strips the [bot] suffix from an App login', () => {
+    expect(mentionNames(['prsentinel[bot]'])).toEqual(['prsentinel']);
+  });
+
+  it('leaves a plain login alone', () => {
+    expect(mentionNames(['prsentinel'])).toEqual(['prsentinel']);
+  });
+
+  it('de-duplicates the login and its mention form', () => {
+    expect(mentionNames(['prsentinel[bot]', 'prsentinel', 'github-actions[bot]'])).toEqual([
+      'prsentinel',
+      'github-actions',
+    ]);
+  });
+
+  it('drops empty entries', () => {
+    expect(mentionNames(['', '  ', 'prsentinel'])).toEqual(['prsentinel']);
+  });
+
+  it('handles the case where an App login is the only identity', () => {
+    // The regression this guards: with App auth, `botLogins[0]` is
+    // `my-app[bot]`, and matching that raw against a comment body never works.
+    const names = mentionNames(['my-app[bot]', 'github-actions[bot]']);
+    expect(parseSlashCommand('@my-app explain the retry logic', names)?.command).toBe('explain');
   });
 });

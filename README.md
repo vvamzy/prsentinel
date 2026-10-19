@@ -58,24 +58,31 @@ jobs:
 
       - uses: your-org/prsentinel@v1
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          # Recommended: post as <your-app>[bot]. See "Register the GitHub App".
+          app-id: ${{ secrets.APP_ID }}
+          app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
           llm-api-key: ${{ secrets.LLM_API_KEY }}
           llm-model: openai/gpt-4o-mini
 ```
 
-Add your API key as a repository secret named `LLM_API_KEY`. Done.
+Add `LLM_API_KEY` as a repository secret, then register a GitHub App (below)
+and add `APP_ID` and `APP_PRIVATE_KEY`. That is the whole setup.
+
+> **In a hurry?** Delete the two `app-*` lines and prsentinel falls back to the
+> workflow's own `${{ github.token }}`, posting as `github-actions[bot]`. No App
+> required — but you get a shared rate limit and a generic identity.
 
 > **Why `pull_request_target`?** On a fork PR the normal `pull_request` event
 > gets a read-only token and cannot post a review. `pull_request_target` gets a
 > write-scoped token — and therefore must never execute PR code. prsentinel
 > reads the diff as data through the API only.
 
-### Post as a GitHub App (recommended)
+### Register the GitHub App
 
-Out of the box prsentinel posts as `github-actions[bot]`. Register a GitHub App
-and it posts as `your-app[bot]` instead — a distinct identity with its own rate
-limit, and without depending on the repository allowing `GITHUB_TOKEN` to write
-(many organisations disable that).
+The App is what gives prsentinel its own identity: it posts as `your-app[bot]`
+rather than `github-actions[bot]`, gets its own rate limit, and does not depend
+on the repository allowing `GITHUB_TOKEN` to write (many organisations disable
+that).
 
 1. Create a GitHub App under **Settings → Developer settings → GitHub Apps**.
    Leave the webhook disabled; prsentinel is driven by Actions, not by
@@ -86,16 +93,6 @@ limit, and without depending on the repository allowing `GITHUB_TOKEN` to write
 4. Install the App on the repository you want reviewed.
 5. Add two repository secrets: `APP_ID` and `APP_PRIVATE_KEY` — paste the whole
    PEM, including the `BEGIN`/`END` lines.
-
-Then switch the step over:
-
-```yaml
-      - uses: your-org/prsentinel@v1
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          llm-api-key: ${{ secrets.LLM_API_KEY }}
-```
 
 The installation is discovered from the repository, so you never have to look up
 an `installation-id`. If a key arrives with literal `\n` sequences or
@@ -171,7 +168,9 @@ Then, in a PR comment:
 | `/explain <path> <question>` | Answer a question about a file. |
 | `/generate-tests [path]` | Propose tests for the changed code. |
 
-You can also mention the bot: `@prsentinel explain the retry logic`.
+You can also mention the bot: `@prsentinel explain the retry logic`. If you
+registered an App under a different slug, mention that instead — `@your-app`.
+prsentinel recognises its own login (`your-app[bot]`) and its mention form.
 
 **Reply to a finding** and prsentinel answers in the thread — it reads the hunk
 and the discussion so far, and will concede when you are right.
