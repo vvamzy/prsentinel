@@ -6,6 +6,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **GitHub App authentication**: set `app-id` + `app-private-key` and prsentinel
+  posts as `<app>[bot]` instead of `github-actions[bot]`, with its own rate
+  limit and no dependence on `GITHUB_TOKEN` write access. The App JWT is signed
+  with `node:crypto` (no new dependency); the private key is accepted as a PEM,
+  a `\n`-escaped PEM, or base64; the installation id is discovered from the
+  repository. `github-token` still works and is used when no App is configured.
 - **Slash commands** via `issue_comment`: `/review`, `/review all`,
   `/review <path>`, `/explain`, `/explain <path> <question>`, and
   `/generate-tests [path]`. Mentioning the bot (`@prsentinel …`) works too.

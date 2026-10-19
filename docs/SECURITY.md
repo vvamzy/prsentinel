@@ -64,6 +64,27 @@ container as an environment variable. It is never written to logs. If you use a
 self-hosted provider, prefer an internal endpoint that does not require a key at
 all.
 
+## GitHub App credentials
+
+Authenticating as a GitHub App adds a second secret: the App's private key. It
+is treated the same way as the LLM key — passed as an Action input, never
+written to logs. The key is used only to sign a short-lived JWT, which is
+exchanged for a one-hour installation token; neither the key nor the JWT is
+retained beyond the run.
+
+Prefer a GitHub App over a personal access token. A PAT carries a human's full
+authorisation and lives until revoked; an installation token is scoped to the
+App's declared permissions, expires within the hour, and is minted per run.
+
+Two things worth being explicit about:
+
+- An App token is **more** powerful than `GITHUB_TOKEN` in the sense that it is
+  not subject to the repository's "allow Actions to write" setting. It does not
+  make the workflow any less privileged, so the checkout rule above still
+  applies in full.
+- The App private key is a long-lived credential. Store it as a repository or
+  organisation secret and rotate it if it is ever exposed.
+
 ## Reporting a vulnerability
 
 Please **do not open a public issue**. Report privately via GitHub's

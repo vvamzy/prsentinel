@@ -8,9 +8,18 @@ branding:
 
 inputs:
   github-token:
-    description: 'GitHub token used to read the PR and post the review.'
-    required: true
+    description: 'GitHub token used to read the PR and post the review. Ignored when app-id and app-private-key are set.'
+    required: false
     default: ${{ github.token }}
+  app-id:
+    description: 'GitHub App id. With app-private-key, prsentinel posts as <app>[bot] instead of github-actions[bot].'
+    required: false
+  app-private-key:
+    description: 'GitHub App private key (PEM, a \n-escaped PEM, or a base64-encoded PEM). Pass via a secret.'
+    required: false
+  installation-id:
+    description: 'App installation id. Discovered from the repository automatically when omitted.'
+    required: false
   llm-api-key:
     description: 'API key for the LLM provider. Falls back to LLM_API_KEY or OPENAI_API_KEY.'
     required: false

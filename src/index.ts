@@ -5,7 +5,8 @@ import { join } from 'node:path';
 
 import { loadConfig, type Config } from './config.js';
 import { log } from './log.js';
-import { GitHubClient } from './github/client.js';
+import { GitHubClient, resolveRepoContext } from './github/client.js';
+import { resolveAuth, hasAnyCredentials, type AuthInputs } from './github/auth.js';
 import { serializePayload } from './github/review.js';
 import { LLM } from './llm/registry.js';
 import { runReview } from './pipeline.js';
@@ -30,6 +31,9 @@ const DEFAULT_BOT_LOGINS = ['prsentinel', 'github-actions[bot]'];
 
 interface RunEnv {
   token: string;
+  appId: string;
+  appPrivateKey: string;
+  installationId: number | undefined;
   llmKey: string;
   llmBaseUrl: string | undefined;
   llmModel: string;
@@ -42,6 +46,12 @@ interface RunEnv {
 
 function readEnv(): RunEnv {
   const token = core.getInput('github-token') || process.env.GITHUB_TOKEN || '';
+  const appId = core.getInput('app-id') || process.env.PRSENTINEL_APP_ID || '';
+  const appPrivateKey =
+    core.getInput('app-private-key') || process.env.PRSENTINEL_APP_PRIVATE_KEY || '';
+  const installationId = Number(
+    core.getInput('installation-id') || process.env.PRSENTINEL_INSTALLATION_ID || '',
+  );
   const llmKey =
     core.getInput('llm-api-key') || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
   const llmBaseUrl = core.getInput('llm-base-url') || process.env.LLM_BASE_URL || undefined;
@@ -57,6 +67,9 @@ function readEnv(): RunEnv {
 
   return {
     token,
+    appId,
+    appPrivateKey,
+    installationId: Number.isFinite(installationId) && installationId > 0 ? installationId : undefined,
     llmKey,
     llmBaseUrl: llmBaseUrl || undefined,
     llmModel: configuredModel || llmModel,
@@ -97,6 +110,20 @@ function makeLlm(env: RunEnv): LLM {
   });
 }
 
+/** Collect credential inputs for `resolveAuth`, resolving owner/repo. */
+function authInputs(env: RunEnv): AuthInputs {
+  const { owner, repo } = resolveRepoContext();
+  return {
+    token: env.token,
+    appId: env.appId,
+    appPrivateKey: env.appPrivateKey,
+    ...(env.installationId ? { installationId: env.installationId } : {}),
+    configuredBotLogins: env.botLogins,
+    owner,
+    repo,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Automatic review (pull_request_target)
 // ---------------------------------------------------------------------------
@@ -132,6 +159,7 @@ async function runCommandFlow(
   client: GitHubClient,
   config: Config,
   llm: LLM,
+  botLogins: string[],
 ): Promise<void> {
   if (!config.commands.enabled) {
     log.info('Commands are disabled in config; ignoring comment.');
@@ -162,12 +190,12 @@ async function runCommandFlow(
   }
 
   // Never act on our own comment, or another bot's.
-  if (isBotLogin(comment.author, env.botLogins) || comment.author.endsWith('[bot]')) {
+  if (isBotLogin(comment.author, botLogins) || comment.author.endsWith('[bot]')) {
     log.info('Comment is from a bot; ignoring.');
     return;
   }
 
-  const parsed = parseSlashCommand(comment.body, env.botLogins[0] ?? 'prsentinel');
+  const parsed = parseSlashCommand(comment.body, botLogins[0] ?? 'prsentinel');
   if (!parsed) {
     log.info('No prsentinel command in comment; nothing to do.');
     return;
@@ -206,7 +234,7 @@ async function runCommandFlow(
     args: parsed.args,
     dryRun: env.dryRun,
     repoRoot: env.repoRoot,
-    botLogin: env.botLogins[0] ?? 'prsentinel',
+    botLogin: botLogins[0] ?? 'prsentinel',
   });
 
   if (result.summary) log.info(result.summary);
@@ -282,11 +310,12 @@ async function emit(
 
 async function main(): Promise<void> {
   const env = readEnv();
+  const auth = authInputs(env);
 
   if (env.eventName === 'pull_request_review_comment') {
     // Chat replies do not need a PR number up front — the payload carries it.
-    if (env.token === '') {
-      core.setFailed('A github-token is required.');
+    if (!hasAnyCredentials(auth)) {
+      core.setFailed('Credentials are required: set app-id + app-private-key, or github-token.');
       return;
     }
     const config = loadConfig(env.repoRoot).config;
@@ -294,7 +323,8 @@ async function main(): Promise<void> {
       log.info('chat.auto_reply is disabled; not replying.');
       return;
     }
-    const client = new GitHubClient(env.token);
+    const resolved = await resolveAuth(auth);
+    const client = resolved.client;
     const prNumber = client.prNumberFromReviewComment() ?? env.prNumber;
     if (!prNumber) {
       log.info('No pull request in review-comment payload; nothing to do.');
@@ -306,7 +336,7 @@ async function main(): Promise<void> {
       llm: makeLlm(env),
       model: chatModel(config, env),
       prNumber,
-      botLogins: env.botLogins,
+      botLogins: resolved.botLogins,
       dryRun: env.dryRun,
     });
     return;
@@ -316,19 +346,20 @@ async function main(): Promise<void> {
     log.info('No pull request context; nothing to do.');
     return;
   }
-  if (env.token === '') {
-    core.setFailed('A github-token is required.');
+  if (!hasAnyCredentials(auth)) {
+    core.setFailed('Credentials are required: set app-id + app-private-key, or github-token.');
     return;
   }
 
   const { config, path: configPath } = loadConfig(env.repoRoot);
   log.info(`Config: ${configPath ?? 'defaults (no .prsentinel.yaml found)'}`);
 
-  const client = new GitHubClient(env.token);
+  const resolved = await resolveAuth(auth);
+  const client = resolved.client;
   const llm = makeLlm(env);
 
   if (env.eventName === 'issue_comment') {
-    await runCommandFlow(env, client, config, llm);
+    await runCommandFlow(env, client, config, llm, resolved.botLogins);
     return;
   }
 

@@ -70,6 +70,43 @@ Add your API key as a repository secret named `LLM_API_KEY`. Done.
 > write-scoped token — and therefore must never execute PR code. prsentinel
 > reads the diff as data through the API only.
 
+### Post as a GitHub App (recommended)
+
+Out of the box prsentinel posts as `github-actions[bot]`. Register a GitHub App
+and it posts as `your-app[bot]` instead — a distinct identity with its own rate
+limit, and without depending on the repository allowing `GITHUB_TOKEN` to write
+(many organisations disable that).
+
+1. Create a GitHub App under **Settings → Developer settings → GitHub Apps**.
+   Leave the webhook disabled; prsentinel is driven by Actions, not by
+   deliveries.
+2. Grant repository permissions **Contents: read**, **Pull requests: write**,
+   **Issues: write**. (`Metadata: read` is added automatically.)
+3. Generate a private key and download the `.pem` file.
+4. Install the App on the repository you want reviewed.
+5. Add two repository secrets: `APP_ID` and `APP_PRIVATE_KEY` — paste the whole
+   PEM, including the `BEGIN`/`END` lines.
+
+Then switch the step over:
+
+```yaml
+      - uses: your-org/prsentinel@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          llm-api-key: ${{ secrets.LLM_API_KEY }}
+```
+
+The installation is discovered from the repository, so you never have to look up
+an `installation-id`. If a key arrives with literal `\n` sequences or
+base64-encoded, prsentinel handles that too. When both an App and a token are
+configured, the App wins.
+
+> The App changes **who** posts the review. It does not change **when** the
+> workflow runs — `pull_request_target` is still required, because the LLM key
+> has to come from a secret and GitHub does not pass secrets to `pull_request`
+> runs from forks.
+
 ## Providers
 
 Set `llm-model` using a `provider/model` id. Anything OpenAI-compatible works:
@@ -183,7 +220,10 @@ See [docs/configuration.md](docs/configuration.md) for the full reference.
 
 | Input | Default | Description |
 |---|---|---|
-| `github-token` | `${{ github.token }}` | Token used to read the PR and post the review. |
+| `github-token` | `${{ github.token }}` | Token used to read the PR and post the review. Ignored when App credentials are set. |
+| `app-id` | — | GitHub App id. With `app-private-key`, posts as `<app>[bot]`. |
+| `app-private-key` | — | GitHub App private key. PEM, `\n`-escaped PEM, or base64 PEM. Use a secret. |
+| `installation-id` | auto | App installation id. Discovered from the repository when omitted. |
 | `llm-api-key` | — | API key. Falls back to `LLM_API_KEY` / `OPENAI_API_KEY`. |
 | `llm-model` | `openai/gpt-4o-mini` | Model id. |
 | `llm-base-url` | — | Override the API base URL. |
@@ -242,6 +282,10 @@ The bundled CI guard (`scripts/check-pr-target-safety.mjs`) fails the build if
 any privileged workflow ever adds a head-ref checkout. The guard has its own
 tests (`tests/guard.test.ts`) because a silently broken guard is worse than no
 guard. See [docs/SECURITY.md](docs/SECURITY.md).
+
+Using a GitHub App does not change this. The App token replaces `GITHUB_TOKEN`
+and gives the review a real identity, but the workflow is still privileged and
+still must never touch PR code.
 
 ## Cost control
 
