@@ -18,6 +18,21 @@ npm run build
 Node 20+ is required. The test suite runs without network access and without an
 API key.
 
+## Branches
+
+`dev` is where work lands, and it is the default branch — pull requests target
+it unless you say otherwise. `main` is the release branch and only moves when
+`dev` is promoted into it.
+
+`main` is protected: merges require a pull request and a passing CI run, and
+direct pushes are rejected. So the flow is always `dev` → PR → `main`.
+
+```bash
+git switch dev
+# ... make your changes ...
+git push origin dev
+```
+
 ## Project layout
 
 ```

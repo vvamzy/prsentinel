@@ -1,8 +1,10 @@
 name: CI
 
 on:
+  # `main` is the release branch and `dev` is where work lands; both need CI on
+  # push, and every pull request needs it regardless of its base branch.
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 permissions:
