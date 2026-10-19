@@ -68,18 +68,33 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **In-process cost controls**: files are filtered *before* any model call.
 - **Security guard** (`scripts/check-pr-target-safety.mjs`) that fails CI if a
   privileged workflow checks out PR head code.
-- **108 tests**, including an end-to-end pipeline test with a stub LLM and an
+- **218 tests**, including an end-to-end pipeline test with a stub LLM and an
   offline fixture harness (`npm run dev:review`).
 - Docker container action, Apache-2.0 licensed.
+
+### Changed
+- **Install instructions pin `@main`**, not the not-yet-existing `@v1`. `v1`
+  will be tagged once the review prompts have been validated against real pull
+  requests.
+- **Workflow actions updated to their current majors** (`actions/checkout@v7`,
+  `actions/setup-node@v7`). `checkout` v7 also refuses to check out a fork PR
+  under `pull_request_target` or `workflow_run`, which prsentinel never does —
+  a second line of defence behind the safety guard.
+
+### Fixed
+- **The CI smoke test failed on every pull request.** `Verify the bundle runs`
+  executed the bundle against the ambient GitHub event, so under `pull_request`
+  it correctly started reviewing the PR and then died on credentials that CI
+  deliberately does not have. Having never seen a pull request, the job had
+  always passed on `push`. It now runs against an event with no pull request,
+  which is what it was trying to assert.
+- **The dogfooding job reported an unconfigured secret as a broken change.**
+  `self-test.yml` now skips with a notice when `LLM_API_KEY` is unset.
 
 ### Notes
 - Runs on `pull_request_target` so fork PRs can be reviewed. This requires the
   "never execute PR code" rule documented in `docs/SECURITY.md`.
 
 ### Not yet implemented
-- `/resolve` — the parser recognises it, but resolving a thread needs the
-  GraphQL thread node id, which is Phase 3 work.
-- GitHub App authentication (fork-PR support currently relies on
-  `pull_request_target`).
 - Local CLI for pre-push review.
 - Indexing the repository for cross-file context beyond the changed files.

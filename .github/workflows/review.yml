@@ -4,7 +4,7 @@ name: Reusable prsentinel review
 #
 #   jobs:
 #     prsentinel:
-#       uses: vvamzy/prsentinel/.github/workflows/review.yml@v1
+#       uses: vvamzy/prsentinel/.github/workflows/review.yml@main
 #       secrets:
 #         llm-api-key: ${{ secrets.LLM_API_KEY }}
 
