@@ -24,6 +24,10 @@ describe('isPrivileged', () => {
     expect(isPrivileged('on:\n  pull_request_review_comment:\n    types: [created]')).toBe(true);
   });
 
+  it('detects a reusable workflow, which inherits its caller privilege', () => {
+    expect(isPrivileged('on:\n  workflow_call:\n    inputs: {}')).toBe(true);
+  });
+
   it('ignores an unprivileged event', () => {
     expect(isPrivileged('on:\n  pull_request:\n    types: [opened]')).toBe(false);
   });

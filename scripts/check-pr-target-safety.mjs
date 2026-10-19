@@ -35,10 +35,15 @@ export const DANGEROUS_REF_PATTERNS = [
 /**
  * Events that run with secrets and a write-scoped token while being
  * triggerable by people outside the repository.
+ *
+ * `workflow_call` is included because a reusable workflow inherits the
+ * privilege of whatever calls it — so it must never check out a head ref
+ * either.
  */
 export const PRIVILEGED_EVENTS = [
   'pull_request_target',
   'workflow_run',
+  'workflow_call',
   'issue_comment',
   'pull_request_review_comment',
 ];
