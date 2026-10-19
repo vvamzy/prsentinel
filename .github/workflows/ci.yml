@@ -1,8 +1,10 @@
 name: CI
 
 on:
+  # `main` is the release branch and `dev` is where work lands; both need CI on
+  # push, and every pull request needs it regardless of its base branch.
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 permissions:
@@ -33,7 +35,15 @@ jobs:
         run: npm run build
 
       - name: Verify the bundle runs
-        run: node dist/index.js
+        # The bundle routes on the GitHub event, so this step's behaviour
+        # depends on which event CI happens to run under. Under pull_request it
+        # would attempt a real review and die on credentials that CI
+        # deliberately does not have. Running it against an event with no pull
+        # request proves what this step is actually for: that the bundle loads
+        # and exits cleanly.
+        run: |
+          echo '{}' > "$RUNNER_TEMP/empty-event.json"
+          GITHUB_EVENT_PATH="$RUNNER_TEMP/empty-event.json" GITHUB_EVENT_NAME=push node dist/index.js
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
 
