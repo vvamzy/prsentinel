@@ -33,6 +33,10 @@ comments.
 
 ## Quick start
 
+> **Pre-release.** These examples pin `@main`, because no stable tag exists yet.
+> `@v1` will be tagged once the review prompts have been validated against real
+> pull requests — until then, prompt behaviour can change between commits.
+
 Create `.github/workflows/prsentinel.yml` in your repository:
 
 ```yaml
@@ -52,11 +56,11 @@ jobs:
     steps:
       # Check out the BASE branch, never the PR head.
       # See "Security model" below — this is not optional.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
 
-      - uses: vvamzy/prsentinel@v1
+      - uses: vvamzy/prsentinel@main
         with:
           # Recommended: post as <your-app>[bot]. See "Register the GitHub App".
           app-id: ${{ secrets.APP_ID }}
@@ -148,10 +152,10 @@ jobs:
     if: github.event.comment.user.type != 'Bot'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.repository.default_branch }}
-      - uses: vvamzy/prsentinel@v1
+      - uses: vvamzy/prsentinel@main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           llm-api-key: ${{ secrets.LLM_API_KEY }}

@@ -25,7 +25,7 @@ package manager, or an interpreter.
 Workflows must check out the **base** ref:
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v7
   with:
     ref: ${{ github.event.pull_request.base.sha }}   # base, not head
 ```
