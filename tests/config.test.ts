@@ -33,6 +33,26 @@ describe('parseConfig', () => {
   it('rejects non-mapping documents', () => {
     expect(() => parseConfig('- a\n- b\n')).toThrow(/YAML mapping/);
   });
+
+  it('populates nested defaults for commands', () => {
+    const c = parseConfig('');
+    expect(c.commands.enabled).toBe(true);
+    expect(c.commands.allowed_associations).toEqual(['OWNER', 'MEMBER', 'COLLABORATOR']);
+    expect(c.commands.max_explain_files).toBe(5);
+  });
+
+  it('merges a partial commands block over its defaults', () => {
+    const c = parseConfig('commands:\n  max_explain_files: 12\n');
+    expect(c.commands.max_explain_files).toBe(12);
+    // Untouched nested fields keep their defaults.
+    expect(c.commands.allowed_associations).toEqual(['OWNER', 'MEMBER', 'COLLABORATOR']);
+  });
+
+  it('rejects an unknown author association', () => {
+    expect(() => parseConfig('commands:\n  allowed_associations: ["WIZARD"]\n')).toThrow(
+      /allowed_associations/,
+    );
+  });
 });
 
 describe('globMatches', () => {

@@ -1,29 +1,32 @@
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { loadConfig, type Config } from './config.js';
 import { log } from './log.js';
 import { GitHubClient } from './github/client.js';
-import { gatherContexts } from './github/context.js';
-import { buildReviewPayload, serializePayload } from './github/review.js';
-import { parsePatch } from './github/diff.js';
+import { serializePayload } from './github/review.js';
 import { LLM } from './llm/registry.js';
-import { mapPhase, type ChangedFile } from './review/map.js';
-import { reducePhase } from './review/reduce.js';
-import { buildPatchIndex, filterFindings } from './review/filter.js';
-import { selectFiles } from './review/select.js';
-import { findLastReviewedSha } from './state.js';
-import type { ReviewPlan } from './review/types.js';
-import { emptyUsage } from './review/types.js';
+import { runReview } from './pipeline.js';
+import { getCommandHandler, commandHelp } from './commands/index.js';
+import { runChat } from './chat.js';
+import { parseSlashCommand, type KnownCommand } from './state.js';
+import type { ReviewPayload } from './review/types.js';
 
 /**
  * prsentinel entry point.
  *
- * Flow: gather → map → reduce → filter → post.
- * Every stage is isolated so it can be unit-tested against fixtures.
+ * Routes on the GitHub event:
+ *
+ *   pull_request_target       → automatic review
+ *   issue_comment             → slash command  (`/review`, `/explain`, …)
+ *   pull_request_review_comment → conversational reply in a review thread
+ *
+ * All three share the same config, client, and LLM facade.
  */
+
+const DEFAULT_BOT_LOGINS = ['prsentinel', 'github-actions[bot]'];
 
 interface RunEnv {
   token: string;
@@ -33,42 +36,38 @@ interface RunEnv {
   prNumber: number;
   dryRun: boolean;
   repoRoot: string;
+  eventName: string;
+  botLogins: string[];
 }
 
 function readEnv(): RunEnv {
   const token = core.getInput('github-token') || process.env.GITHUB_TOKEN || '';
   const llmKey =
     core.getInput('llm-api-key') || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
-  const llmBaseUrl =
-    core.getInput('llm-base-url') || process.env.LLM_BASE_URL || undefined;
-  const llmModel =
-    core.getInput('llm-model') || process.env.LLM_MODEL || 'openai/gpt-4o-mini';
+  const llmBaseUrl = core.getInput('llm-base-url') || process.env.LLM_BASE_URL || undefined;
+  const llmModel = core.getInput('llm-model') || process.env.LLM_MODEL || 'openai/gpt-4o-mini';
   const dryRunRaw = (core.getInput('dry-run') || process.env.DRY_RUN || 'false').toLowerCase();
   const repoRoot = core.getInput('repo-root') || process.env.GITHUB_WORKSPACE || process.cwd();
+  const botLogin = core.getInput('bot-login') || process.env.PRSENTINEL_BOT_LOGIN || '';
 
-  const prNumber =
-    Number(core.getInput('pr-number')) ||
-    contextPrNumber() ||
-    0;
+  const configuredModel = core.getInput('llm-model') || process.env.LLM_MODEL || '';
+  const botLogins = botLogin
+    ? [botLogin, ...DEFAULT_BOT_LOGINS.filter((b) => b !== botLogin)]
+    : DEFAULT_BOT_LOGINS;
 
   return {
     token,
     llmKey,
     llmBaseUrl: llmBaseUrl || undefined,
-    llmModel,
-    prNumber,
+    llmModel: configuredModel || llmModel,
+    prNumber: Number(core.getInput('pr-number')) || contextPrNumber() || 0,
     dryRun: dryRunRaw === 'true' || dryRunRaw === '1',
     repoRoot,
+    eventName: process.env.GITHUB_EVENT_NAME ?? github.context.eventName ?? '',
+    botLogins,
   };
 }
 
-/**
- * Best-effort PR number from the event payload.
- *
- * `github.context.repo`/`.issue` throw when GITHUB_REPOSITORY is unset, which
- * is exactly the case when a contributor runs this locally. Never let that
- * crash the run.
- */
 function contextPrNumber(): number {
   try {
     const payload = github.context.payload as {
@@ -81,31 +80,237 @@ function contextPrNumber(): number {
   }
 }
 
-/** Decide which files survive config filters and hard caps. */
+/** Resolve the model for review work, preferring config over the input. */
+function reviewModel(config: Config, env: RunEnv): string {
+  return config.models.review || env.llmModel;
+}
 
-/**
- * Restrict to files touched since a previous review SHA (incremental mode).
- * Falls back to all files when the comparison can't be made.
- */
-export async function filesSinceSha(
+/** Cheaper model for conversation; falls back to the review model. */
+function chatModel(config: Config, env: RunEnv): string {
+  return config.models.chat || reviewModel(config, env);
+}
+
+function makeLlm(env: RunEnv): LLM {
+  return new LLM({
+    apiKey: env.llmKey,
+    ...(env.llmBaseUrl ? { baseUrl: env.llmBaseUrl } : {}),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Automatic review (pull_request_target)
+// ---------------------------------------------------------------------------
+
+async function runAutoReview(
+  env: RunEnv,
   client: GitHubClient,
-  files: ChangedFile[],
-  sinceSha: string | null,
-  headSha: string,
-): Promise<ChangedFile[]> {
-  if (!sinceSha || sinceSha === headSha) return files;
-  try {
-    const changedSince = new Set(await client.compareCommits(sinceSha, headSha));
-    if (changedSince.size === 0) return [];
-    return files.filter((f) => changedSince.has(f.filename));
-  } catch (err) {
-    log.warn(`incremental compare failed, falling back to full review: ${String(err)}`);
-    return files;
+  config: Config,
+  llm: LLM,
+): Promise<void> {
+  const outcome = await runReview({
+    client,
+    config,
+    llm,
+    model: reviewModel(config, env),
+    prNumber: env.prNumber,
+  });
+
+  if (outcome.pr.draft && !config.reviews.drafts) {
+    log.info('Draft PR and drafts are disabled in config; skipping.');
+    return;
+  }
+
+  await emit(env, client, outcome.payload, outcome.plan.findings.length);
+}
+
+// ---------------------------------------------------------------------------
+// Slash commands (issue_comment)
+// ---------------------------------------------------------------------------
+
+async function runCommandFlow(
+  env: RunEnv,
+  client: GitHubClient,
+  config: Config,
+  llm: LLM,
+): Promise<void> {
+  if (!config.commands.enabled) {
+    log.info('Commands are disabled in config; ignoring comment.');
+    return;
+  }
+
+  const payload = github.context.payload as {
+    comment?: { id?: number };
+    issue?: { number?: number; pull_request?: unknown };
+  };
+
+  if (!payload.issue?.pull_request) {
+    log.info('Comment is not on a pull request; nothing to do.');
+    return;
+  }
+
+  const commentId = payload.comment?.id;
+  if (typeof commentId !== 'number') {
+    log.info('No comment id in payload; nothing to do.');
+    return;
+  }
+
+  // Re-fetch so `body` and `author_association` are authoritative.
+  const comment = await client.getIssueComment(commentId);
+  if (!comment) {
+    log.warn(`Could not fetch comment ${commentId}; nothing to do.`);
+    return;
+  }
+
+  // Never act on our own comment, or another bot's.
+  if (isBotLogin(comment.author, env.botLogins) || comment.author.endsWith('[bot]')) {
+    log.info('Comment is from a bot; ignoring.');
+    return;
+  }
+
+  const parsed = parseSlashCommand(comment.body, env.botLogins[0] ?? 'prsentinel');
+  if (!parsed) {
+    log.info('No prsentinel command in comment; nothing to do.');
+    return;
+  }
+
+  log.kv({ command: parsed.command, author: comment.author, association: comment.authorAssociation });
+
+  // Cost and abuse control: comments are untrusted, every command spends tokens.
+  if (!config.commands.allowed_associations.includes(comment.authorAssociation as never)) {
+    log.warn(
+      `Ignoring /${parsed.command} from ${comment.author} (author_association=${comment.authorAssociation}).`,
+    );
+    await client.createComment(
+      env.prNumber,
+      `> [!NOTE]\n> \`/${parsed.command}\` is restricted to ${config.commands.allowed_associations.join(
+        ', ',
+      )}. Your association is \`${comment.authorAssociation}\`. Ask a maintainer to run it.`,
+    );
+    return;
+  }
+
+  const handler = getCommandHandler(parsed.command as KnownCommand);
+  if (!handler) {
+    await client.createComment(env.prNumber, commandHelp());
+    return;
+  }
+
+  const result = await handler({
+    client,
+    config,
+    llm,
+    model: chatModel(config, env),
+    prNumber: env.prNumber,
+    comment,
+    command: parsed.command as KnownCommand,
+    args: parsed.args,
+    dryRun: env.dryRun,
+    repoRoot: env.repoRoot,
+    botLogin: env.botLogins[0] ?? 'prsentinel',
+  });
+
+  if (result.summary) log.info(result.summary);
+
+  if (result.review) {
+    await emit(env, client, result.review, result.review.comments.length);
+    return;
+  }
+
+  if (result.comment) {
+    if (env.dryRun) {
+      log.notice(`Dry run: would post comment:\n${result.comment}`);
+      core.setOutput('comment-body', result.comment);
+    } else {
+      const posted = await client.createComment(env.prNumber, result.comment);
+      log.notice(`Comment posted: ${posted.url}`);
+      core.setOutput('comment-url', posted.url);
+    }
   }
 }
 
+function isBotLogin(login: string, botLogins: string[]): boolean {
+  const l = login.toLowerCase();
+  return botLogins.some((b) => l === b.toLowerCase() || l.includes(b.toLowerCase()));
+}
+
+// ---------------------------------------------------------------------------
+// Emit
+// ---------------------------------------------------------------------------
+
+/**
+ * Post a review, or write it to `out/` in dry-run mode.
+ * Shared by the automatic review and `/review`.
+ */
+async function emit(
+  env: RunEnv,
+  client: GitHubClient,
+  payload: ReviewPayload,
+  findingCount: number,
+): Promise<void> {
+  if (env.dryRun) {
+    const outDir = join(env.repoRoot, 'out');
+    mkdirSync(outDir, { recursive: true });
+    const outFile = join(outDir, `review-${env.prNumber}-${payload.commit_id.slice(0, 7)}.json`);
+    writeFileSync(outFile, serializePayload(payload), 'utf8');
+    log.notice(`Dry run: wrote ${outFile} (${payload.comments.length} comments, not posted)`);
+    core.setOutput('payload-file', outFile);
+    core.setOutput('comment-count', String(payload.comments.length));
+    return;
+  }
+
+  if (payload.comments.length === 0 && payload.body.trim() === '') {
+    log.info('Nothing to post.');
+    return;
+  }
+
+  const res = await client.createReview({
+    number: env.prNumber,
+    commitId: payload.commit_id,
+    body: payload.body,
+    event: payload.event,
+    comments: payload.comments,
+  });
+  log.notice(`Review posted: ${res.url} (${payload.comments.length} inline comments)`);
+  core.setOutput('review-url', res.url);
+  core.setOutput('comment-count', String(payload.comments.length));
+  core.setOutput('finding-count', String(findingCount));
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
 async function main(): Promise<void> {
   const env = readEnv();
+
+  if (env.eventName === 'pull_request_review_comment') {
+    // Chat replies do not need a PR number up front — the payload carries it.
+    if (env.token === '') {
+      core.setFailed('A github-token is required.');
+      return;
+    }
+    const config = loadConfig(env.repoRoot).config;
+    if (!config.chat.auto_reply) {
+      log.info('chat.auto_reply is disabled; not replying.');
+      return;
+    }
+    const client = new GitHubClient(env.token);
+    const prNumber = client.prNumberFromReviewComment() ?? env.prNumber;
+    if (!prNumber) {
+      log.info('No pull request in review-comment payload; nothing to do.');
+      return;
+    }
+    await runChat({
+      client,
+      config,
+      llm: makeLlm(env),
+      model: chatModel(config, env),
+      prNumber,
+      botLogins: env.botLogins,
+      dryRun: env.dryRun,
+    });
+    return;
+  }
 
   if (env.prNumber === 0) {
     log.info('No pull request context; nothing to do.');
@@ -119,159 +324,25 @@ async function main(): Promise<void> {
   const { config, path: configPath } = loadConfig(env.repoRoot);
   log.info(`Config: ${configPath ?? 'defaults (no .prsentinel.yaml found)'}`);
 
+  const client = new GitHubClient(env.token);
+  const llm = makeLlm(env);
+
+  if (env.eventName === 'issue_comment') {
+    await runCommandFlow(env, client, config, llm);
+    return;
+  }
+
+  // Default: an automatic review.
   if (!config.reviews.enabled) {
     log.info('Reviews disabled in config; exiting.');
     return;
   }
-
-  const client = new GitHubClient(env.token);
-  const pr = await client.getPullRequest(env.prNumber);
-
-  if (pr.draft && !config.reviews.drafts) {
-    log.info('Draft PR and drafts are disabled in config; skipping.');
-    return;
-  }
-
-  log.kv({ pr: pr.number, title: pr.title, head: pr.headSha.slice(0, 7) });
-
-  // --- Gather ------------------------------------------------------------
-  let changedFiles = await client.getChangedFiles(env.prNumber);
-
-  if (config.reviews.incremental) {
-    const reviews = await client.listReviews(env.prNumber);
-    const lastSha = findLastReviewedSha(reviews);
-    if (lastSha) {
-      const before = changedFiles.length;
-      changedFiles = await filesSinceSha(client, changedFiles, lastSha, pr.headSha);
-      log.info(`Incremental: ${before} changed files → ${changedFiles.length} since last review`);
-    }
-  }
-
-  const { selected, skipped } = selectFiles(changedFiles, config);
-  log.kv({ files_total: changedFiles.length, files_selected: selected.length, files_skipped: skipped.length });
-
-  if (selected.length === 0) {
-    log.info('No reviewable files after filtering.');
-    return;
-  }
-
-  const skipSet = new Set(skipped.map((s) => s.file));
-  const { contexts } = await gatherContexts(client, pr.headSha, selected, {
-    config,
-    skipFiles: skipSet,
-    totalBudget: config.reviews.max_total_diff_bytes,
-    perFileCap: config.reviews.max_file_bytes,
-  });
-
-  // --- LLM setup ---------------------------------------------------------
-  const model = config.models.review || env.llmModel;
   if (env.llmKey === '' && !env.dryRun) {
-    core.setFailed('No LLM API key configured. Set llm-api-key input or LLM_API_KEY secret.');
-    return;
-  }
-  const llm = new LLM({ apiKey: env.llmKey, ...(env.llmBaseUrl ? { baseUrl: env.llmBaseUrl } : {}) });
-
-  // --- Map ---------------------------------------------------------------
-  const gathered = {
-    title: pr.title,
-    body: pr.body,
-    headSha: pr.headSha,
-    baseSha: pr.baseSha,
-    number: pr.number,
-    files: selected,
-    contexts,
-    skipped,
-  };
-
-  const analyses = await mapPhase(llm, model, gathered, config);
-  const totalFindings = analyses.reduce((n, a) => n + a.findings.length, 0);
-  log.info(`Map phase: ${analyses.length} files, ${totalFindings} raw findings`);
-
-  // --- Reduce ------------------------------------------------------------
-  let plan: ReviewPlan;
-  try {
-    plan = await reducePhase(llm, model, {
-      prTitle: pr.title,
-      prBody: pr.body,
-      analyses,
-    });
-  } catch (err) {
-    log.warn(`Reduce phase failed, using per-file summaries: ${String(err)}`);
-    plan = {
-      walkthrough: analyses
-        .filter((a) => a.summary)
-        .map((a) => `- \`${a.file}\` — ${a.summary}`)
-        .join('\n'),
-      findings: analyses.flatMap((a) => a.findings),
-      fileSummaries: analyses.filter((a) => a.summary).map((a) => ({ file: a.file, summary: a.summary })),
-      usage: emptyUsage(),
-    };
-  }
-
-  // --- Filter ------------------------------------------------------------
-  const parsedByFile = buildPatchIndex(selected);
-  // Also index files whose patches we skipped but might have context.
-  for (const f of selected) {
-    if (!parsedByFile.has(f.filename) && f.patch) {
-      try {
-        parsedByFile.set(f.filename, parsePatch(f.patch));
-      } catch {
-        /* leave unindexed */
-      }
-    }
-  }
-
-  const filtered = filterFindings(plan.findings, {
-    config,
-    changedFiles: selected,
-    parsedByFile,
-    allPrFiles: changedFiles.map((f) => f.filename),
-  });
-  log.kv({
-    findings_before: filtered.stats.before,
-    findings_after: filtered.stats.after,
-    dropped_confidence: filtered.stats.droppedConfidence,
-    dropped_out_of_hunk: filtered.stats.droppedOutOfHunk,
-    dropped_duplicate: filtered.stats.droppedDuplicate,
-    dropped_cap: filtered.stats.droppedCap,
-    suppressed_style: filtered.stats.suppressedStyle,
-  });
-
-  const finalPlan: ReviewPlan = { ...plan, findings: filtered.findings };
-
-  // --- Emit --------------------------------------------------------------
-  const payload = buildReviewPayload(finalPlan, config, {
-    headSha: pr.headSha,
-    skipped,
-  });
-
-  if (env.dryRun) {
-    const outDir = join(env.repoRoot, 'out');
-    mkdirSync(outDir, { recursive: true });
-    const outFile = join(outDir, `review-${pr.number}-${pr.headSha.slice(0, 7)}.json`);
-    writeFileSync(outFile, serializePayload(payload), 'utf8');
-    log.notice(`Dry run: wrote ${outFile} (${payload.comments.length} comments, not posted)`);
-    core.setOutput('payload-file', outFile);
-    core.setOutput('comment-count', String(payload.comments.length));
+    core.setFailed('No LLM API key configured. Set the llm-api-key input or LLM_API_KEY secret.');
     return;
   }
 
-  if (payload.comments.length === 0 && finalPlan.walkthrough.trim() === '') {
-    log.info('Nothing to post.');
-    return;
-  }
-
-  const res = await client.createReview({
-    number: pr.number,
-    commitId: pr.headSha,
-    body: payload.body,
-    event: payload.event,
-    comments: payload.comments,
-  });
-  log.notice(`Review posted: ${res.url} (${payload.comments.length} inline comments)`);
-  core.setOutput('review-url', res.url);
-  core.setOutput('comment-count', String(payload.comments.length));
-  core.setOutput('finding-count', String(finalPlan.findings.length));
+  await runAutoReview(env, client, config, llm);
 }
 
 main().catch((err) => {

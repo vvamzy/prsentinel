@@ -93,6 +93,61 @@ llm-base-url: http://your-gpu-host:11434/v1
 Because `ollama` and `vllm` are OpenAI-compatible, you can run prsentinel
 against a model on your own hardware and send **no code to a third party**.
 
+## Commands
+
+Add a second workflow to enable slash commands and review-thread replies:
+
+```yaml
+# .github/workflows/prsentinel-commands.yml
+name: prsentinel commands
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+jobs:
+  command:
+    if: github.event.comment.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: your-org/prsentinel@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          llm-api-key: ${{ secrets.LLM_API_KEY }}
+```
+
+Then, in a PR comment:
+
+| Command | What it does |
+|---|---|
+| `/review` | Review the commits added since the last review. |
+| `/review all` | Re-review the whole pull request. |
+| `/review <path>` | Re-review one file or directory. |
+| `/explain` | Explain what the change does. |
+| `/explain <path> <question>` | Answer a question about a file. |
+| `/generate-tests [path]` | Propose tests for the changed code. |
+
+You can also mention the bot: `@prsentinel explain the retry logic`.
+
+**Reply to a finding** and prsentinel answers in the thread — it reads the hunk
+and the discussion so far, and will concede when you are right.
+
+> **Who can run commands?** Only people with write access by default
+> (`OWNER`, `MEMBER`, `COLLABORATOR`). Every command spends tokens, and
+> comments are untrusted input, so this is configurable but conservative:
+>
+> ```yaml
+> commands:
+>   allowed_associations: ["OWNER", "MEMBER", "COLLABORATOR"]
+> ```
+
 ## Configuration
 
 Drop a `.prsentinel.yaml` in your repo root. Everything is optional.
@@ -135,6 +190,7 @@ See [docs/configuration.md](docs/configuration.md) for the full reference.
 | `pr-number` | auto | Pull request number. |
 | `config-path` | `.` | Where to look for `.prsentinel.yaml`. |
 | `dry-run` | `false` | Write the payload to `out/` instead of posting. |
+| `bot-login` | auto | Login prsentinel posts as, for detecting its own comments. |
 
 ## Outputs
 
@@ -144,6 +200,8 @@ See [docs/configuration.md](docs/configuration.md) for the full reference.
 | `payload-file` | Path to the payload in dry-run mode. |
 | `comment-count` | Number of inline comments. |
 | `finding-count` | Findings after filtering. |
+| `comment-url` | URL of a comment posted by a slash command. |
+| `reply-url` | URL of a review-thread reply. |
 
 ## How it works
 
@@ -175,9 +233,15 @@ absolute:
 > Never check out, build, or execute code from the PR head.
 
 prsentinel reads patches and file contents as data through the GitHub API. The
-bundled CI guard (`scripts/check-pr-target-safety.mjs`) fails the build if any
-privileged workflow ever adds a head-ref checkout. See
-[docs/SECURITY.md](docs/SECURITY.md).
+same applies to the command workflows: `issue_comment` and
+`pull_request_review_comment` can be triggered by anyone who can comment, so
+they check out the default branch and refuse commands from users without write
+access.
+
+The bundled CI guard (`scripts/check-pr-target-safety.mjs`) fails the build if
+any privileged workflow ever adds a head-ref checkout. The guard has its own
+tests (`tests/guard.test.ts`) because a silently broken guard is worse than no
+guard. See [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Cost control
 
@@ -197,7 +261,7 @@ Use `dry-run: true` to see exactly what would be posted, for free.
 ```bash
 npm ci
 npm run typecheck
-npm test          # 100 tests, no network required
+npm test          # 149 tests, no network required
 npm run build
 ```
 

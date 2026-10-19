@@ -32,6 +32,10 @@ inputs:
     description: 'Write the review payload to out/ instead of posting it.'
     required: false
     default: 'false'
+  bot-login:
+    description: 'Login prsentinel posts as, used to detect its own comments. Defaults to prsentinel / github-actions[bot].'
+    required: false
+    default: ''
 
 outputs:
   review-url:
@@ -42,6 +46,14 @@ outputs:
     description: 'Number of inline comments in the review.'
   finding-count:
     description: 'Number of findings after filtering.'
+  comment-url:
+    description: 'URL of a comment posted by a slash command.'
+  comment-body:
+    description: 'Body a slash command would post (dry run only).'
+  reply-url:
+    description: 'URL of a review-thread reply.'
+  reply-body:
+    description: 'Body of the review-thread reply (dry run only).'
 
 runs:
   using: 'docker'

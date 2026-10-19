@@ -45,6 +45,25 @@ export const configSchema = z.object({
     })
     .default({}),
 
+  commands: z
+    .object({
+      enabled: z.boolean().default(true),
+      /**
+       * Which commenters may trigger a command. Comments are untrusted input
+       * and every command costs tokens, so the default is limited to people
+       * with write access.
+       *
+       * GitHub's `author_association` values: OWNER, MEMBER, COLLABORATOR,
+       * CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, MANNEQUIN, NONE.
+       */
+      allowed_associations: z
+        .array(z.enum(['OWNER', 'MEMBER', 'COLLABORATOR', 'CONTRIBUTOR', 'FIRST_TIME_CONTRIBUTOR', 'NONE']))
+        .default(['OWNER', 'MEMBER', 'COLLABORATOR']),
+      /** Max files `/explain` will inline. */
+      max_explain_files: z.number().int().min(1).max(50).default(5),
+    })
+    .default({}),
+
   /** Hint injected into the prompt. Empty = let the model infer. */
   language: z.string().default(''),
 

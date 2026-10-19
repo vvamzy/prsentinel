@@ -221,6 +221,88 @@ export class GitHubClient {
     );
   }
 
+  /**
+   * Fetch one issue/PR comment by id.
+   *
+   * Used to read the comment that triggered a slash command. We re-fetch it
+   * rather than trusting the event payload so the body and
+   * `author_association` are the authoritative current values.
+   */
+  async getIssueComment(commentId: number): Promise<IssueComment | null> {
+    try {
+      const { data } = await this.octokit.rest.issues.getComment({
+        owner: this.owner,
+        repo: this.repo,
+        comment_id: commentId,
+      });
+      return {
+        id: data.id,
+        body: data.body ?? '',
+        author: data.user?.login ?? '',
+        authorAssociation: data.author_association ?? 'NONE',
+        createdAt: data.created_at,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /** List a PR's conversation comments, oldest first. */
+  async listIssueComments(number: number): Promise<IssueComment[]> {
+    const comments = await this.octokit.paginate(this.octokit.rest.issues.listComments, {
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: number,
+      per_page: 100,
+    });
+    return comments.map((c) => ({
+      id: c.id,
+      body: c.body ?? '',
+      author: c.user?.login ?? '',
+      authorAssociation: c.author_association ?? 'NONE',
+      createdAt: c.created_at,
+    }));
+  }
+
+  /**
+   * List inline review comments, optionally for one file.
+   *
+   * Used to give the model the existing discussion when answering a reply on
+   * a review thread, so it does not repeat what has already been said.
+   */
+  async listReviewComments(
+    number: number,
+    path?: string,
+  ): Promise<Array<{ id: number; path: string; line: number | null; body: string; author: string; inReplyTo: number | null }>> {
+    const comments = await this.octokit.paginate(this.octokit.rest.pulls.listReviewComments, {
+      owner: this.owner,
+      repo: this.repo,
+      pull_number: number,
+      per_page: 100,
+      ...(path ? { path } : {}),
+    });
+    return comments.map((c) => ({
+      id: c.id,
+      path: c.path,
+      line: c.line ?? null,
+      body: c.body ?? '',
+      author: c.user?.login ?? '',
+      inReplyTo: c.in_reply_to_id ?? null,
+    }));
+  }
+
+  /** Reply inside an existing review thread. */
+  async replyToReviewComment(number: number, commentId: number, body: string): Promise<{ id: number; url: string }> {
+    const { data } = await this.octokit.rest.pulls.createReplyForReviewComment({
+      owner: this.owner,
+      repo: this.repo,
+      pull_number: number,
+      comment_id: commentId,
+      body,
+    });
+    return { id: data.id, url: data.html_url };
+  }
+
   /** Get the PR number from a comment payload, or null if not a PR. */
   static prNumberFromIssueComment(): number | null {
     const payload = github.context.payload;
@@ -228,4 +310,22 @@ export class GitHubClient {
     if (!issue || !issue.pull_request) return null;
     return issue.number;
   }
+
+  /** Get the PR number from a `pull_request_review_comment` payload. */
+  prNumberFromReviewComment(): number | null {
+    const payload = github.context.payload as {
+      pull_request?: { number?: number };
+      comment?: { pull_request_review_id?: number };
+    };
+    return payload.pull_request?.number ?? null;
+  }
+}
+
+export interface IssueComment {
+  id: number;
+  body: string;
+  author: string;
+  /** GitHub's author_association: OWNER, MEMBER, COLLABORATOR, ... */
+  authorAssociation: string;
+  createdAt: string;
 }

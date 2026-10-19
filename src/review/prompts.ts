@@ -194,3 +194,116 @@ export function renderCommentBody(config: Config, f: Finding): string {
   }
   return parts.join('\n');
 }
+
+// ---------------------------------------------------------------------------
+// Slash-command prompts
+//
+// These render *reply comments*, not inline review comments. They therefore
+// return plain markdown rather than a findings array — there is nowhere to
+// anchor an inline comment when the user just asks a question.
+// ---------------------------------------------------------------------------
+
+export const COMMAND_SYSTEM = `You are prsentinel, a precise and skeptical code reviewer.
+You are answering a developer who asked about a specific pull request.
+
+Rules:
+- Answer the question that was asked. Do not produce a generic code review.
+- Ground every claim in the code you were given. Quote the relevant lines.
+- If you are unsure, say so plainly. Do not guess at behaviour you cannot see.
+- Use markdown. Prefer short paragraphs and bullet lists over walls of text.
+- Reference code as \`path:line\` so the developer can jump straight there.
+- Keep it under roughly 400 words unless the question genuinely requires more.
+
+Output: markdown only. No preamble, no closing pleasantries.`;
+
+export function explainUserPrompt(params: {
+  prTitle: string;
+  prBody: string;
+  question: string;
+  fileSections: string;
+}): string {
+  const parts: string[] = [];
+  parts.push(`Pull request: ${params.prTitle}`);
+  if (params.prBody) parts.push(`Description:\n${params.prBody.slice(0, 2000)}`);
+  parts.push(`--- Changed code ---\n${params.fileSections}`);
+  parts.push(
+    params.question
+      ? `--- Question ---\n${params.question}`
+      : '--- Question ---\nExplain what this change does, how it affects existing behaviour, and anything a reviewer should scrutinise.',
+  );
+  return parts.join('\n\n');
+}
+
+export const TESTS_SYSTEM = `You are prsentinel, writing tests for a pull request's changed code.
+
+Rules:
+- Propose tests that would actually catch a regression in the changed lines.
+- Match the framework, style, and naming already used in the repository if
+  examples were provided. If none were provided, say which framework you
+  assumed.
+- Cover the unhappy paths: empty input, boundaries, error propagation, and the
+  specific branch the change introduces.
+- Do not test framework behaviour or trivial getters.
+- Output real, runnable code in fenced blocks with the correct language tag.
+- If the change is genuinely untestable as written, say why and suggest the
+  smallest refactor that would make it testable.
+
+Output: markdown only.`;
+
+export function testsUserPrompt(params: {
+  file: string;
+  annotatedPatch: string;
+  existingTestExample: string;
+  question: string;
+}): string {
+  const parts: string[] = [];
+  parts.push(`Write tests covering this change to \`${params.file}\`.`);
+  parts.push(`--- Change (annotated) ---\n${params.annotatedPatch}`);
+  if (params.existingTestExample) {
+    parts.push(`--- Example of this repository's existing test style ---\n${params.existingTestExample}`);
+  }
+  if (params.question) parts.push(`--- Additional request ---\n${params.question}`);
+  parts.push('Propose the tests.');
+  return parts.join('\n\n');
+}
+
+export const CHAT_SYSTEM = `You are prsentinel, replying inside a pull request review thread.
+
+Rules:
+- A reviewer or author replied to one of your findings. Respond to that reply.
+- Be concise: two or three sentences is usually right. This is a thread, not an
+  essay.
+- If they push back and they are right, concede clearly and say what you got
+  wrong. Do not defend a bad finding.
+- If they push back and the issue is real, restate the problem in one sentence
+  and offer the smallest fix.
+- Never repeat the entire original finding back at them.
+- If they ask you to do something you cannot do, say so.
+
+Output: markdown only, no preamble.`;
+
+export function chatUserPrompt(params: {
+  thread: string;
+  diff: string;
+  reply: string;
+}): string {
+  const parts: string[] = [];
+  parts.push(`--- Review thread so far ---\n${params.thread}`);
+  if (params.diff) parts.push(`--- Relevant diff ---\n${params.diff}`);
+  parts.push(`--- Latest reply from the developer ---\n${params.reply}`);
+  parts.push('Write your reply.');
+  return parts.join('\n\n');
+}
+
+/** Render a PR's changed files into compact sections for a prompt. */
+export function renderFileSections(
+  files: Array<{ filename: string; annotated: string; summary?: string }>,
+): string {
+  return files
+    .map((f) => {
+      const head = `### ${f.filename}`;
+      const summary = f.summary ? `\n_${f.summary}_\n` : '';
+      return `${head}${summary}\n${f.annotated}`;
+    })
+    .join('\n\n');
+}

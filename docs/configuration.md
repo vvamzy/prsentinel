@@ -23,6 +23,11 @@ reviews:
 chat:
   auto_reply: true
 
+commands:
+  enabled: true
+  allowed_associations: ["OWNER", "MEMBER", "COLLABORATOR"]
+  max_explain_files: 5
+
 language: ''
 
 models:
@@ -119,8 +124,43 @@ already lints, style comments are pure noise.
 ## `chat`
 
 ### `auto_reply`
-Default `true`. Reserved for conversational replies on review threads
-(Phase 2).
+Default `true`. When enabled, prsentinel answers replies inside review threads
+that it started. It never joins a thread between two humans.
+
+## `commands`
+
+Slash commands and their permissions.
+
+```yaml
+commands:
+  enabled: true
+  allowed_associations: ["OWNER", "MEMBER", "COLLABORATOR"]
+  max_explain_files: 5
+```
+
+### `enabled`
+Default `true`. Turn off all slash commands without removing the workflow.
+
+### `allowed_associations`
+Default `["OWNER", "MEMBER", "COLLABORATOR"]`.
+
+The comments that trigger commands are untrusted input, and every command costs
+tokens (and could be used to exhaust your API quota). prsentinel compares the
+commenter's GitHub `author_association` against this list.
+
+GitHub's possible values: `OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`,
+`FIRST_TIME_CONTRIBUTOR`, `NONE`.
+
+When a commenter is not permitted, prsentinel posts a short note explaining the
+rule rather than failing silently — so contributors understand why nothing
+happened.
+
+> **Think before adding `CONTRIBUTOR`.** It means anyone whose PR was merged
+> once can trigger LLM calls on any PR in the repository.
+
+### `max_explain_files`
+Default `5`. Caps how many files `/explain` and `/generate-tests` inline into
+the prompt. Raise it for better answers on large PRs, at higher token cost.
 
 ## `language`
 An optional hint about the codebase's primary language. Improves prompt quality

@@ -23,6 +23,13 @@ reviews:
 
 language: typescript
 
+# Slash commands. Restricted to people with write access by default: every
+# command spends tokens and comments are untrusted input.
+commands:
+  enabled: true
+  allowed_associations: ["OWNER", "MEMBER", "COLLABORATOR"]
+  max_explain_files: 5
+
 models:
   review: openai/gpt-4o-mini
   chat: openai/gpt-4o-mini

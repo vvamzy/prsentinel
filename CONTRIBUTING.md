@@ -22,9 +22,17 @@ API key.
 
 ```
 src/
-  index.ts            orchestration: gather → map → reduce → filter → post
+  index.ts            entry point; routes on the GitHub event
+  pipeline.ts         the review pipeline (gather → map → reduce → filter)
+  chat.ts             review-thread replies
   config.ts           .prsentinel.yaml schema, glob/path-filter logic
   state.ts            incremental-review markers, slash-command parsing
+  commands/
+    index.ts          slash-command registry + help text
+    shared.ts         scope/question parsing, patch preparation
+    review.ts         /review
+    explain.ts        /explain
+    generate-tests.ts /generate-tests
   github/
     client.ts         octokit wrapper — all GitHub API shapes live here
     diff.ts           unified-diff parsing  ← hardest code, most tests
@@ -40,6 +48,7 @@ src/
     map.ts            per-file analysis (parallel)
     reduce.ts         walkthrough + dedupe
     filter.ts         deterministic noise reduction  ← the moat
+    select.ts         pre-flight file selection (cost control)
     chunker.ts        splits oversized patches at hunk boundaries
 ```
 
@@ -58,6 +67,20 @@ src/
 - Language-aware hunk grouping
 - Detecting and skipping vendored code
 - Per-category confidence thresholds
+- Implementing `/resolve` (needs the GraphQL thread node id)
+
+## Adding a slash command
+
+1. Write a handler in `src/commands/` that returns a `CommandResult`
+   (`{ comment }` for a plain comment, `{ review }` for inline comments).
+2. Register it in `COMMANDS` in `src/commands/index.ts`.
+3. If it has arguments, add it to `KNOWN_COMMANDS` in `src/state.ts` — note
+   that `parseSlashCommand` and `src/commands/index.ts` both keep a list, and
+   they must stay in sync.
+4. Add it to `commandHelp()` and `docs/configuration.md`.
+
+Handlers must not post anything themselves: the dispatcher in `src/index.ts`
+owns posting so that `dry-run` keeps working for free.
 
 ## Testing rules
 
