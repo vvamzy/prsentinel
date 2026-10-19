@@ -29,8 +29,11 @@ ARG LLAMA_BUILD=b11731
 
 ENV NODE_ENV=production
 
+# libgomp1 is not part of the ubuntu base image but llama.cpp links against the
+# GNU OpenMP runtime; without it llama-server dies at load with
+# "libgomp.so.1: cannot open shared object file".
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates libstdc++6 tini curl \
+    && apt-get install -y --no-install-recommends ca-certificates libstdc++6 libgomp1 tini curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Node 22, borrowed from the official image rather than a hand-rolled repo setup.
@@ -51,7 +54,11 @@ RUN set -eux; \
     tar -xzf /tmp/llama.tar.gz -C /opt/llama --strip-components=1; \
     rm -f /tmp/llama.tar.gz; \
     test -x /opt/llama/llama-server; \
-    LD_LIBRARY_PATH=/opt/llama ldd /opt/llama/llama-server >/dev/null
+    if LD_LIBRARY_PATH=/opt/llama ldd /opt/llama/llama-server | grep -q 'not found'; then \
+      echo 'llama-server has unresolved shared libraries:'; \
+      LD_LIBRARY_PATH=/opt/llama ldd /opt/llama/llama-server; \
+      exit 1; \
+    fi
 
 ENV PATH=/opt/llama:$PATH \
     LD_LIBRARY_PATH=/opt/llama
