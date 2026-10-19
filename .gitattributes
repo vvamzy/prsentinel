@@ -1,0 +1,19 @@
+# Normalize line endings. Windows checkouts get CRLF for text, but shell
+# scripts, Dockerfiles, and generated dist output must stay LF so they work
+# inside the Linux container.
+* text=auto eol=lf
+
+*.sh   text eol=lf
+Dockerfile text eol=lf
+*.mjs  text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Binary assets.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+
+# Keep lockfiles out of diffs and merge conflicts.
+package-lock.json -diff linguist-generated
