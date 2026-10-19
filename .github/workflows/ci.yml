@@ -66,33 +66,10 @@ jobs:
 
       # Every other job runs the bundle with `node` directly, so the Dockerfile
       # is otherwise never exercised. The bundled llama.cpp binary is the one
-      # piece that cannot be validated any other way: it is a prebuilt glibc
-      # binary, and if the base image's glibc or libstdc++ is too old it fails
-      # at load time with `GLIBC_x.y not found` — only once a user picks a
-      # `local/…` model.
-      - name: Verify the bundled inference server loads
+      # piece that cannot be validated any other way, and a mistake in the image
+      # only surfaces for a user who picked a `local/…` model — long after CI
+      # went green. The script is the same one developers can run locally.
+      - name: Verify the bundled inference server works
         run: |
-          docker run --rm --entrypoint /bin/sh prsentinel-action -c '
-            set -e
-            node --version
-
-            # ldd exits 0 even when a dependency is missing, so read its output
-            # rather than trusting its status.
-            libs=$(ldd /opt/llama/llama-server)
-            case "$libs" in
-              *"not found"*) echo "unresolved shared libraries:"; echo "$libs"; exit 1;;
-            esac
-
-            # ldd cannot see the CPU backend: ggml dlopens
-            # libggml-cpu-<microarch>.so at runtime and picks the variant matching
-            # this CPU. Asking for the device list forces that load, and needs no
-            # model weights. Tolerating a non-zero exit because --list-devices is
-            # a "print and stop" flag whose exit status is not contractual.
-            devices=$(llama-server --list-devices 2>&1 || true)
-            echo "$devices"
-            case "$devices" in
-              *"error while loading shared libraries"*) exit 1;;
-            esac
-            echo "$devices" | grep -q "Available devices"
-            echo "$devices" | grep -qi "cpu"
-          '
+          docker run --rm -i --entrypoint /bin/sh prsentinel-action \
+            < scripts/verify-local-model.sh
