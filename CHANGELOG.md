@@ -6,6 +6,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Live-PR harness**: `npm run dev:pr -- owner/repo#123` fetches a real pull
+  request over the API and runs the full pipeline against a real model, with
+  `--out` saving it as a fixture so it can be re-run for free. This is the only
+  way to judge whether the *suggestions* are good, which the offline stub
+  harness cannot assess.
 - **`/resolve`**: resolves the review threads prsentinel opened, via the
   GraphQL thread node id that no REST endpoint exposes. Only threads *we*
   started are touched — a reviewer's thread we merely replied to is left alone —

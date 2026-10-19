@@ -16,6 +16,7 @@
     "build": "esbuild src/index.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist/index.js --banner:js=\"import{createRequire}from'node:module';const require=createRequire(import.meta.url);\"",
     "dev": "tsx src/index.ts",
     "dev:review": "tsx scripts/dev-review.ts",
+    "dev:pr": "tsx scripts/dev-review.ts --pr",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

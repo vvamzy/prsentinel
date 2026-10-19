@@ -33,11 +33,15 @@ src/
     review.ts         /review
     explain.ts        /explain
     generate-tests.ts /generate-tests
+    resolve.ts        /resolve (GraphQL thread resolution)
   github/
     client.ts         octokit wrapper — all GitHub API shapes live here
+    app-auth.ts       GitHub App JWT signing + installation tokens
+    auth.ts           credential resolution (App or token)
     diff.ts           unified-diff parsing  ← hardest code, most tests
     context.ts        decides what extra file content to fetch
     review.ts         builds the createReview payload
+    pr-ref.ts         parses owner/repo#123 references
   llm/
     provider.ts       provider interface, JSON extraction, concurrency pool
     openai.ts         OpenAI-compatible (covers OpenAI/Groq/Ollama/vLLM/…)
@@ -67,7 +71,7 @@ src/
 - Language-aware hunk grouping
 - Detecting and skipping vendored code
 - Per-category confidence thresholds
-- Implementing `/resolve` (needs the GraphQL thread node id)
+- Reviewing prompt output against real PRs (see below)
 
 ## Adding a slash command
 
@@ -99,6 +103,32 @@ npm test                 # all tests
 npm run test:watch       # watch mode
 npx vitest run tests/diff.test.ts   # one file
 ```
+
+## Reviewing real pull requests
+
+The unit tests prove the mechanics. They cannot tell you whether the review is
+*any good* — that needs a real model on real diffs. `scripts/dev-review.ts`
+runs the whole pipeline and prints the payload it would have posted:
+
+```bash
+# Offline, deterministic, no key needed:
+npm run dev:review -- fixtures/sample-pr.json --stub
+
+# Against a real model on a saved fixture:
+LLM_API_KEY=sk-... npm run dev:review -- fixtures/sample-pr.json
+
+# Against a real pull request, saving it as a fixture for next time:
+GITHUB_TOKEN=ghp_... LLM_API_KEY=sk-... \
+  npm run dev:pr -- acme/widgets#42 --out fixtures/pr-42.json
+```
+
+`--pr` reads the diff through the API — the same read-as-data path the Action
+uses, with no checkout — so it is safe to point at any public PR.
+
+The last thing the harness prints is a check that every comment anchors to a
+line that genuinely exists in the diff. Treat a non-zero exit there as a bug,
+because it is: that is the failure that produces a 422 from GitHub, or worse, a
+comment on unrelated code.
 
 ## Pull requests
 

@@ -3,21 +3,32 @@
  * Offline review harness for contributors.
  *
  * Runs the full pipeline (map → reduce → filter → payload) against a saved PR
- * fixture, with no GitHub API calls and no network unless you pass a real key.
+ * fixture, or against a live pull request, with no GitHub API calls unless you
+ * ask for one.
  *
  * Usage:
  *   npx tsx scripts/dev-review.ts fixtures/sample-pr.json --stub
  *   LLM_API_KEY=sk-... npx tsx scripts/dev-review.ts fixtures/sample-pr.json
+ *   GITHUB_TOKEN=ghp_... LLM_API_KEY=sk-... npx tsx scripts/dev-review.ts \
+ *       --pr acme/widgets#42 --out fixtures/pr-42.json
+ *
+ * `--pr` fetches a real pull request (patch only — no checkout, so this is the
+ * same read-as-data path the Action uses). `--out` saves it as a fixture so the
+ * same PR can be re-run for free afterwards.
  *
  * `--stub` uses a deterministic heuristic reviewer that flags TODO/FIXME and
  * stray console.log calls. That is enough to exercise filtering, line mapping,
  * and payload rendering — the parts most likely to break — for free.
+ *
+ * What this harness cannot tell you is whether the *suggestions are good*.
+ * Only a real model on real PRs can answer that.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { loadConfig, parseConfig } from '../src/config.js';
+import { parsePrRef } from '../src/github/pr-ref.js';
 import { mapPhase, type ChangedFile, type GatheredPr } from '../src/review/map.js';
 import { reducePhase } from '../src/review/reduce.js';
 import { buildPatchIndex, filterFindings } from '../src/review/filter.js';
@@ -38,6 +49,66 @@ interface Fixture {
     changes: number;
     patch: string | null;
   }>;
+}
+
+/** Flags that consume the following argument. */
+const VALUE_FLAGS = new Set(['--config', '--pr', '--out']);
+
+function argValue(args: string[], name: string): string | undefined {
+  const i = args.indexOf(name);
+  return i !== -1 ? args[i + 1] : undefined;
+}
+
+/** The first positional argument that is not a flag or a flag's value. */
+function positionalArg(args: string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a.startsWith('--')) {
+      if (VALUE_FLAGS.has(a)) i++; // skip the value it consumes
+      continue;
+    }
+    return a;
+  }
+  return undefined;
+}
+
+/** Pull the parts of a PR we need, over the API, without checking anything out. */
+async function fetchFixture(ref: string): Promise<Fixture> {
+  const parsed = parsePrRef(ref);
+  if (!parsed) {
+    throw new Error(`Could not parse "${ref}". Use owner/repo#123 or a GitHub pull URL.`);
+  }
+
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
+  if (!token) {
+    throw new Error('Fetching a live pull request needs GITHUB_TOKEN (or GH_TOKEN).');
+  }
+
+  const { GitHubClient } = await import('../src/github/client.js');
+  const client = new GitHubClient(token, parsed.owner, parsed.repo);
+
+  const [pr, files] = await Promise.all([
+    client.getPullRequest(parsed.number),
+    client.getChangedFiles(parsed.number),
+  ]);
+
+  console.log(
+    `Fetched ${parsed.owner}/${parsed.repo}#${parsed.number}: "${pr.title}" (${files.length} file(s))`,
+  );
+
+  return {
+    title: pr.title,
+    body: pr.body,
+    number: pr.number,
+    headSha: pr.headSha,
+    baseSha: pr.baseSha,
+    files: files.map((f) => ({
+      filename: f.filename,
+      status: f.status,
+      changes: f.changes,
+      patch: f.patch,
+    })),
+  };
 }
 
 /** Deterministic fake reviewer: flags markers we can grep for. */
@@ -136,17 +207,30 @@ function extractFindingsFromPrompt(userText: string): unknown[] {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const fixturePath = args.find((a) => !a.startsWith('--'));
+  const fixturePath = positionalArg(args);
   const useStub = args.includes('--stub');
-  const configIdx = args.indexOf('--config');
-  const configPath = configIdx !== -1 ? args[configIdx + 1] : undefined;
+  const configPath = argValue(args, '--config');
+  const prRef = argValue(args, '--pr');
+  const outPath = argValue(args, '--out');
 
-  if (!fixturePath) {
-    console.error('Usage: npx tsx scripts/dev-review.ts <fixture.json> [--stub] [--config path]');
+  if (!fixturePath && !prRef) {
+    console.error(
+      [
+        'Usage: npx tsx scripts/dev-review.ts <fixture.json> [--stub] [--config path]',
+        '       npx tsx scripts/dev-review.ts --pr owner/repo#123 [--out fixture.json]',
+      ].join('\n'),
+    );
     process.exit(2);
   }
 
-  const fixture = JSON.parse(readFileSync(resolve(fixturePath), 'utf8')) as Fixture;
+  const fixture: Fixture = prRef
+    ? await fetchFixture(prRef)
+    : (JSON.parse(readFileSync(resolve(fixturePath!), 'utf8')) as Fixture);
+
+  if (prRef && outPath) {
+    writeFileSync(resolve(outPath), `${JSON.stringify(fixture, null, 2)}\n`, 'utf8');
+    console.log(`Saved fixture to ${outPath}`);
+  }
 
   const config = configPath
     ? parseConfig(readFileSync(resolve(configPath), 'utf8'))
@@ -187,7 +271,7 @@ async function main(): Promise<void> {
     model = config.models.review || process.env.LLM_MODEL || 'openai/gpt-4o-mini';
   }
 
-  console.log(`Fixture: ${fixturePath}`);
+  console.log(`Source:  ${prRef ?? fixturePath}`);
   console.log(`Files:   ${allFiles.length} total, ${selected.length} selected, ${skipped.length} skipped`);
   for (const s of skipped) console.log(`         skip ${s.file} (${s.reason})`);
   console.log(`Model:   ${model}${useStub ? ' (stub, offline)' : ''}\n`);
