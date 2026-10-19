@@ -29,7 +29,10 @@ export interface CommandContext {
   args: string;
   dryRun: boolean;
   repoRoot: string;
+  /** The mention form of our identity, for prompts. */
   botLogin: string;
+  /** Every login we answer to, for telling our comments apart from others'. */
+  botLogins: string[];
 }
 
 export interface CommandResult {

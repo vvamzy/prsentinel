@@ -167,6 +167,7 @@ Then, in a PR comment:
 | `/explain` | Explain what the change does. |
 | `/explain <path> <question>` | Answer a question about a file. |
 | `/generate-tests [path]` | Propose tests for the changed code. |
+| `/resolve` | Resolve the review threads prsentinel opened. |
 
 You can also mention the bot: `@prsentinel explain the retry logic`. If you
 registered an App under a different slug, mention that instead — `@your-app`.

@@ -222,6 +222,80 @@ export class GitHubClient {
   }
 
   /**
+   * List a PR's review threads with their GraphQL node ids.
+   *
+   * The REST API exposes inline comments but not threads, so `/resolve` needs
+   * GraphQL: resolving requires the thread's node id, which no REST endpoint
+   * returns. We record the author of each thread's first comment so the caller
+   * can tell ours apart from a reviewer's.
+   */
+  async listReviewThreads(number: number): Promise<ReviewThread[]> {
+    const query = `query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: $number) {
+          reviewThreads(first: 100, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              id
+              isResolved
+              path
+              line
+              comments(first: 1) { nodes { author { login } } }
+            }
+          }
+        }
+      }
+    }`;
+
+    interface ThreadsResponse {
+      repository?: {
+        pullRequest?: {
+          reviewThreads?: {
+            pageInfo: { hasNextPage: boolean; endCursor: string | null };
+            nodes: Array<{
+              id: string;
+              isResolved: boolean;
+              path: string;
+              line: number | null;
+              comments: { nodes: Array<{ author: { login: string } | null }> };
+            }>;
+          };
+        } | null;
+      } | null;
+    }
+
+    const out: ReviewThread[] = [];
+    let cursor: string | null = null;
+
+    // Paginate explicitly: octokit's helper does not understand this shape.
+    do {
+      const data = (await this.octokit.graphql(query, {
+        owner: this.owner,
+        repo: this.repo,
+        number,
+        cursor,
+      })) as ThreadsResponse;
+
+      const threads = data.repository?.pullRequest?.reviewThreads;
+      if (!threads) break;
+
+      for (const t of threads.nodes) {
+        out.push({
+          id: t.id,
+          isResolved: t.isResolved,
+          path: t.path,
+          line: t.line ?? null,
+          author: t.comments.nodes[0]?.author?.login ?? '',
+        });
+      }
+
+      cursor = threads.pageInfo.hasNextPage ? threads.pageInfo.endCursor : null;
+    } while (cursor);
+
+    return out;
+  }
+
+  /**
    * Fetch one issue/PR comment by id.
    *
    * Used to read the comment that triggered a slash command. We re-fetch it
@@ -328,4 +402,15 @@ export interface IssueComment {
   /** GitHub's author_association: OWNER, MEMBER, COLLABORATOR, ... */
   authorAssociation: string;
   createdAt: string;
+}
+
+/** One review conversation thread, as identified by GraphQL. */
+export interface ReviewThread {
+  /** GraphQL node id, required by `resolveReviewThread`. */
+  id: string;
+  isResolved: boolean;
+  path: string;
+  line: number | null;
+  /** Login of the author of the thread's first comment. */
+  author: string;
 }

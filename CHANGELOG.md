@@ -6,6 +6,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **`/resolve`**: resolves the review threads prsentinel opened, via the
+  GraphQL thread node id that no REST endpoint exposes. Only threads *we*
+  started are touched — a reviewer's thread we merely replied to is left alone —
+  and one failure does not stop the rest.
 - **GitHub App authentication**: set `app-id` + `app-private-key` and prsentinel
   posts as `<app>[bot]` instead of `github-actions[bot]`, with its own rate
   limit and no dependence on `GITHUB_TOKEN` write access. The App JWT is signed

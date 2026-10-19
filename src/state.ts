@@ -110,3 +110,16 @@ export function mentionNames(botLogins: string[]): string[] {
   }
   return out;
 }
+
+/**
+ * Whether a comment or review author is one of our identities.
+ *
+ * Exact and case-insensitive. A substring test would treat a user called
+ * `not-prsentinel` as us, and `/resolve` acts on the answer — resolving or
+ * leaving alone someone else's threads.
+ */
+export function isOurLogin(author: string, botLogins: string[]): boolean {
+  const a = author.trim().toLowerCase();
+  if (a === '') return false;
+  return botLogins.some((b) => a === b.trim().toLowerCase());
+}

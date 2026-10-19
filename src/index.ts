@@ -235,6 +235,7 @@ async function runCommandFlow(
     dryRun: env.dryRun,
     repoRoot: env.repoRoot,
     botLogin: mentionNames(botLogins)[0] ?? 'prsentinel',
+    botLogins,
   });
 
   if (result.summary) log.info(result.summary);

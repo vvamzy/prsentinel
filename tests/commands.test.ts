@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { splitScopeAndQuestion, trimToWindow } from '../src/commands/shared.js';
+import type { CommandContext } from '../src/commands/shared.js';
 import { applyScope } from '../src/pipeline.js';
 import { getCommandHandler, commandHelp } from '../src/commands/index.js';
+import { resolveCommand } from '../src/commands/resolve.js';
+import type { Config } from '../src/config.js';
+import type { GitHubClient, ReviewThread } from '../src/github/client.js';
 import type { ChangedFile } from '../src/review/map.js';
 
 function file(filename: string): ChangedFile {
@@ -109,11 +113,13 @@ describe('command registry', () => {
     expect(getCommandHandler('review')).toBeTypeOf('function');
     expect(getCommandHandler('explain')).toBeTypeOf('function');
     expect(getCommandHandler('generate-tests')).toBeTypeOf('function');
+    expect(getCommandHandler('resolve')).toBeTypeOf('function');
   });
 
-  it('returns null for a command that is parsed but not implemented', () => {
-    // `resolve` is recognised by the parser but deliberately unimplemented.
-    expect(getCommandHandler('resolve')).toBeNull();
+  it('every parsed command has a handler, so the parser never offers a dead command', () => {
+    for (const c of ['review', 'explain', 'generate-tests', 'resolve'] as const) {
+      expect(getCommandHandler(c), c).toBeTypeOf('function');
+    }
   });
 
   it('help text mentions every implemented command', () => {
@@ -121,5 +127,111 @@ describe('command registry', () => {
     expect(help).toContain('/review');
     expect(help).toContain('/explain');
     expect(help).toContain('/generate-tests');
+    expect(help).toContain('/resolve');
+  });
+});
+
+describe('resolveCommand', () => {
+  const OURS = ['prsentinel[bot]', 'prsentinel', 'github-actions[bot]'];
+
+  function ctxFor(threads: ReviewThread[], opts: { dryRun?: boolean } = {}) {
+    const resolved: string[] = [];
+    const client = {
+      listReviewThreads: async () => threads,
+      resolveThread: async (id: string) => {
+        resolved.push(id);
+      },
+    };
+    const ctx = {
+      client: client as unknown as GitHubClient,
+      config: {} as Config,
+      llm: {} as never,
+      model: 'test',
+      prNumber: 1,
+      comment: {
+        id: 1,
+        body: '/resolve',
+        author: 'maintainer',
+        authorAssociation: 'OWNER',
+        createdAt: '',
+      },
+      command: 'resolve',
+      args: '',
+      dryRun: opts.dryRun ?? false,
+      repoRoot: '.',
+      botLogin: 'prsentinel',
+      botLogins: OURS,
+    } as unknown as CommandContext;
+    return { ctx, resolved };
+  }
+
+  function thread(over: Partial<ReviewThread> = {}): ReviewThread {
+    return {
+      id: 'PRRT_1',
+      isResolved: false,
+      path: 'src/a.ts',
+      line: 12,
+      author: 'prsentinel[bot]',
+      ...over,
+    };
+  }
+
+  it('resolves our open threads', async () => {
+    const { ctx, resolved } = ctxFor([thread({ id: 'T1' }), thread({ id: 'T2' })]);
+    const res = await resolveCommand(ctx);
+    expect(resolved).toEqual(['T1', 'T2']);
+    expect(res.comment).toContain('**2**');
+  });
+
+  it('leaves already-resolved threads alone', async () => {
+    const { ctx, resolved } = ctxFor([thread({ id: 'T1', isResolved: true })]);
+    const res = await resolveCommand(ctx);
+    expect(resolved).toEqual([]);
+    expect(res.comment).toContain('Nothing to resolve');
+  });
+
+  it('never resolves a thread a reviewer started', async () => {
+    const { ctx, resolved } = ctxFor([thread({ author: 'a-human' })]);
+    const res = await resolveCommand(ctx);
+    expect(resolved).toEqual([]);
+    expect(res.comment).toContain('Nothing to resolve');
+  });
+
+  it('recognises our App login as well as the bot login', async () => {
+    const { ctx, resolved } = ctxFor([thread({ author: 'github-actions[bot]' })]);
+    await resolveCommand(ctx);
+    expect(resolved).toEqual(['PRRT_1']);
+  });
+
+  it('does not treat a similarly-named user as us', async () => {
+    const { ctx, resolved } = ctxFor([thread({ author: 'not-prsentinel' })]);
+    await resolveCommand(ctx);
+    expect(resolved).toEqual([]);
+  });
+
+  it('does not mutate anything on a dry run but reports the count', async () => {
+    const { ctx, resolved } = ctxFor([thread({ id: 'T1' }), thread({ id: 'T2' })], { dryRun: true });
+    const res = await resolveCommand(ctx);
+    expect(resolved).toEqual([]);
+    expect(res.comment).toContain('Dry run');
+    expect(res.comment).toContain('2');
+  });
+
+  it('keeps going when one thread fails and reports the failures', async () => {
+    const resolved: string[] = [];
+    const client = {
+      listReviewThreads: async () => [thread({ id: 'T1' }), thread({ id: 'T2', path: 'src/b.ts' })],
+      resolveThread: async (id: string) => {
+        if (id === 'T1') throw new Error('boom');
+        resolved.push(id);
+      },
+    };
+    const { ctx } = ctxFor([]);
+    (ctx as { client: unknown }).client = client as unknown as GitHubClient;
+
+    const res = await resolveCommand(ctx);
+    expect(resolved).toEqual(['T2']);
+    expect(res.comment).toContain('**1**');
+    expect(res.comment).toContain('src/a.ts:12');
   });
 });
