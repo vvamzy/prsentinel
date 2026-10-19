@@ -6,6 +6,19 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Bundled local models** (`llm-model: local/…`). prsentinel can now run the
+  model itself, inside the action container, with no API key and no code leaving
+  the job. `llama-server` is started on loopback and reached through the
+  existing OpenAI-compatible provider, so the review pipeline is unchanged.
+  Three Qwen2.5-Coder sizes ship (`7b`, `3b`, `1.5b`), each verified against the
+  SHA-256 recorded in its HuggingFace LFS pointer, with the 7B as the default
+  because the free runner has 4 vCPU and CPU throughput — not RAM — is the real
+  constraint. Weights are cached between runs, and a half-written download is
+  never mistaken for a complete one.
+- **`local-model-cache` input** to point the weight cache at an
+  `actions/cache` directory.
+- **`ROADMAP.md`**, recording the self-hosted-inference-server path and the
+  larger-runner/GPU option, with the reasons each is not built yet.
 - **Live-PR harness**: `npm run dev:pr -- owner/repo#123` fetches a real pull
   request over the API and runs the full pipeline against a real model, with
   `--out` saving it as a fixture so it can be re-run for free. This is the only
@@ -68,11 +81,16 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **In-process cost controls**: files are filtered *before* any model call.
 - **Security guard** (`scripts/check-pr-target-safety.mjs`) that fails CI if a
   privileged workflow checks out PR head code.
-- **218 tests**, including an end-to-end pipeline test with a stub LLM and an
+- **237 tests**, including an end-to-end pipeline test with a stub LLM and an
   offline fixture harness (`npm run dev:review`).
 - Docker container action, Apache-2.0 licensed.
 
 ### Changed
+- **`llm-model` no longer carries an action-level default**, so an unset input
+  is distinguishable from one set to `openai/gpt-4o-mini`. The default still
+  applies, in code. This also lets prsentinel warn when `.prsentinel.yaml`
+  overrides a model the workflow explicitly asked for — previously that
+  mismatch was silent, which made switching models look broken.
 - **Install instructions pin `@main`**, not the not-yet-existing `@v1`. `v1`
   will be tagged once the review prompts have been validated against real pull
   requests.

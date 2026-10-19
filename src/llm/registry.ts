@@ -12,6 +12,10 @@ import { AnthropicProvider } from './anthropic.js';
  *   3. Anything with an explicit provider prefix (`openai/`, `groq/`, ...)
  *      → OpenAICompatProvider at that provider's baseUrl
  *   4. Bare model name             → OpenAICompatProvider at api.openai.com
+ *
+ * `local/*` never reaches here on its own: those models are served by a
+ * llama-server that `ensureLocalServer` starts, and arrive as a bare model name
+ * with an explicit `baseUrl` of `http://127.0.0.1:<port>/v1`.
  */
 
 export interface ProviderCredentials {
@@ -49,6 +53,17 @@ export function resolveProvider(
   // Anthropic is the only non-OpenAI-compatible API we ship.
   if (prefix === 'anthropic' || model.startsWith('claude')) {
     return { provider: new AnthropicProvider(creds.apiKey, creds.baseUrl), model: bareModel };
+  }
+
+  // A `local/*` id without a base URL means someone wired the model straight
+  // into the registry and skipped the llama-server bootstrap. Fail loudly
+  // instead of silently sending the request to api.openai.com.
+  if (prefix === 'local' && !creds.baseUrl) {
+    throw new Error(
+      `"${model}" is a local model and must be started first. ` +
+        'Local models are bootstrapped by ensureLocalServer() in src/llm/local.ts, ' +
+        'which provides the base URL this call is missing.',
+    );
   }
 
   // Explicit base URL wins over any prefix lookup.

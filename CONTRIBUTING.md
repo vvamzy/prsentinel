@@ -62,6 +62,7 @@ src/
     openai.ts         OpenAI-compatible (covers OpenAI/Groq/Ollama/vLLM/…)
     anthropic.ts      Anthropic Messages API
     registry.ts       model id → provider routing
+    local.ts          bundled llama.cpp models (local/…): download, serve
   review/
     prompts.ts        system prompt, per-phase prompts, JSON schemas
     map.ts            per-file analysis (parallel)

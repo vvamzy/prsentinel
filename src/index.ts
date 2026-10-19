@@ -9,6 +9,13 @@ import { GitHubClient, resolveRepoContext } from './github/client.js';
 import { resolveAuth, hasAnyCredentials, type AuthInputs } from './github/auth.js';
 import { serializePayload } from './github/review.js';
 import { LLM } from './llm/registry.js';
+import {
+  isLocalModel,
+  ensureLocalServer,
+  modelCacheDir,
+  stopLocalServers,
+  DEFAULT_LOCAL_MODEL,
+} from './llm/local.js';
 import { runReview } from './pipeline.js';
 import { getCommandHandler, commandHelp } from './commands/index.js';
 import { runChat } from './chat.js';
@@ -37,6 +44,9 @@ interface RunEnv {
   llmKey: string;
   llmBaseUrl: string | undefined;
   llmModel: string;
+  /** The raw `llm-model` input, empty when the workflow did not set it. */
+  llmModelInput: string;
+  localModelCache: string | undefined;
   prNumber: number;
   dryRun: boolean;
   repoRoot: string;
@@ -55,12 +65,15 @@ function readEnv(): RunEnv {
   const llmKey =
     core.getInput('llm-api-key') || process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
   const llmBaseUrl = core.getInput('llm-base-url') || process.env.LLM_BASE_URL || undefined;
-  const llmModel = core.getInput('llm-model') || process.env.LLM_MODEL || 'openai/gpt-4o-mini';
+  // No `default` in action.yml, so an empty value means "the workflow said
+  // nothing" and a config file is free to choose instead.
+  const llmModelInput = core.getInput('llm-model') || process.env.LLM_MODEL || '';
+  const llmModel = llmModelInput || `openai/gpt-4o-mini`;
+  const localModelCache = core.getInput('local-model-cache') || process.env.PRSENTINEL_LOCAL_CACHE || undefined;
   const dryRunRaw = (core.getInput('dry-run') || process.env.DRY_RUN || 'false').toLowerCase();
   const repoRoot = core.getInput('repo-root') || process.env.GITHUB_WORKSPACE || process.cwd();
   const botLogin = core.getInput('bot-login') || process.env.PRSENTINEL_BOT_LOGIN || '';
 
-  const configuredModel = core.getInput('llm-model') || process.env.LLM_MODEL || '';
   const botLogins = botLogin
     ? [botLogin, ...DEFAULT_BOT_LOGINS.filter((b) => b !== botLogin)]
     : DEFAULT_BOT_LOGINS;
@@ -72,7 +85,9 @@ function readEnv(): RunEnv {
     installationId: Number.isFinite(installationId) && installationId > 0 ? installationId : undefined,
     llmKey,
     llmBaseUrl: llmBaseUrl || undefined,
-    llmModel: configuredModel || llmModel,
+    llmModel,
+    llmModelInput,
+    localModelCache: localModelCache || undefined,
     prNumber: Number(core.getInput('pr-number')) || contextPrNumber() || 0,
     dryRun: dryRunRaw === 'true' || dryRunRaw === '1',
     repoRoot,
@@ -103,11 +118,44 @@ function chatModel(config: Config, env: RunEnv): string {
   return config.models.chat || reviewModel(config, env);
 }
 
-function makeLlm(env: RunEnv): LLM {
+/**
+ * `.prsentinel.yaml` wins over the `llm-model` input, which is deliberate —
+ * config is repo policy. But losing to a file you may have forgotten about is
+ * confusing, so say so when the two disagree.
+ */
+function warnOnModelOverride(config: Config, env: RunEnv): void {
+  if (env.llmModelInput && config.models.review && env.llmModelInput !== config.models.review) {
+    log.warn(
+      `llm-model input "${env.llmModelInput}" is overridden by ` +
+        `.prsentinel.yaml models.review "${config.models.review}". ` +
+        `Edit the config file to change the review model.`,
+    );
+  }
+}
+
+/**
+ * Build the LLM facade for `model`.
+ *
+ * A `local/…` model is downloaded and served by llama-server on loopback; the
+ * provider then talks to it over the ordinary OpenAI-compatible path.
+ */
+async function makeLlm(env: RunEnv, model: string): Promise<LLM> {
+  if (isLocalModel(model)) {
+    const server = await ensureLocalServer(model, {
+      cacheDir: modelCacheDir(env.repoRoot, env.localModelCache),
+    });
+    return new LLM({ apiKey: 'local', baseUrl: server.baseUrl });
+  }
+
   return new LLM({
     apiKey: env.llmKey,
     ...(env.llmBaseUrl ? { baseUrl: env.llmBaseUrl } : {}),
   });
+}
+
+/** A local model needs no key, so the "no LLM key" check must not fire for it. */
+function needsApiKey(model: string): boolean {
+  return !isLocalModel(model);
 }
 
 /** Collect credential inputs for `resolveAuth`, resolving owner/repo. */
@@ -331,11 +379,13 @@ async function main(): Promise<void> {
       log.info('No pull request in review-comment payload; nothing to do.');
       return;
     }
+    warnOnModelOverride(config, env);
+    const model = chatModel(config, env);
     await runChat({
       client,
       config,
-      llm: makeLlm(env),
-      model: chatModel(config, env),
+      llm: await makeLlm(env, model),
+      model,
       prNumber,
       botLogins: resolved.botLogins,
       dryRun: env.dryRun,
@@ -354,12 +404,18 @@ async function main(): Promise<void> {
 
   const { config, path: configPath } = loadConfig(env.repoRoot);
   log.info(`Config: ${configPath ?? 'defaults (no .prsentinel.yaml found)'}`);
+  warnOnModelOverride(config, env);
 
   const resolved = await resolveAuth(auth);
   const client = resolved.client;
-  const llm = makeLlm(env);
 
   if (env.eventName === 'issue_comment') {
+    if (!config.commands.enabled) {
+      log.info('Commands are disabled in config; ignoring comment.');
+      return;
+    }
+    const model = chatModel(config, env);
+    const llm = await makeLlm(env, model);
     await runCommandFlow(env, client, config, llm, resolved.botLogins);
     return;
   }
@@ -369,14 +425,25 @@ async function main(): Promise<void> {
     log.info('Reviews disabled in config; exiting.');
     return;
   }
-  if (env.llmKey === '' && !env.dryRun) {
-    core.setFailed('No LLM API key configured. Set the llm-api-key input or LLM_API_KEY secret.');
+
+  const model = reviewModel(config, env);
+  if (needsApiKey(model) && env.llmKey === '' && !env.dryRun) {
+    core.setFailed(
+      'No LLM API key configured. Set the llm-api-key input or LLM_API_KEY secret, ' +
+        `or pick a bundled model such as \`local/${DEFAULT_LOCAL_MODEL}\`.`,
+    );
     return;
   }
 
-  await runAutoReview(env, client, config, llm);
+  await runAutoReview(env, client, config, await makeLlm(env, model));
 }
 
-main().catch((err) => {
-  core.setFailed(err instanceof Error ? err.stack ?? err.message : String(err));
-});
+main()
+  .catch((err) => {
+    core.setFailed(err instanceof Error ? err.stack ?? err.message : String(err));
+  })
+  .finally(async () => {
+    // A local model runs as a child process. Without this the action would sit
+    // waiting on it long after the review was posted, until the job times out.
+    await stopLocalServers();
+  });
