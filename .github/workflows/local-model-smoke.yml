@@ -1,0 +1,135 @@
+name: Local model smoke test
+
+# Manual and slow, deliberately outside PR CI: it downloads a multi-gigabyte
+# GGUF and runs a real review on a CPU-only runner.
+#
+# Run it after changing src/llm/local.ts or the Dockerfile, or to measure what a
+# bundled model actually costs on a free runner — the numbers no unit test can
+# give you. It needs no LLM key: the model is local and the review is a dry run.
+#
+# Two things keep it cheap to repeat: it pulls the image published by
+# publish.yml rather than rebuilding it, and it caches the weights.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        description: Pull request number in this repository to review.
+        required: true
+      model:
+        description: Bundled model id.
+        required: false
+        default: local/qwen2.5-coder-7b-instruct
+      image-tag:
+        description: Image tag published to ghcr.io.
+        required: false
+        default: dev
+      threads:
+        description: llama.cpp threads. A free public runner has 4 vCPU.
+        required: false
+        default: '4'
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  smoke:
+    name: ${{ inputs.model }} on PR #${{ inputs.pr-number }}
+    runs-on: ubuntu-latest
+    # A cold 4.4 GB download, then map-reduce inference with no GPU.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Pull the published image
+        run: docker pull "ghcr.io/${{ github.repository }}:${{ inputs.image-tag }}"
+
+      # The container keeps weights under the checkout by default. Point it at
+      # one directory so actions/cache can find them, and note that a stale
+      # cache is safe: ensureModel verifies size and sha256 on every run and
+      # refetches on a mismatch.
+      - name: Cache the model weights
+        uses: actions/cache@v6
+        with:
+          path: .prsentinel-smoke-cache
+          key: local-model-${{ inputs.model }}
+
+      # models.review in .prsentinel.yaml outranks the llm-model input, and this
+      # repository's own config pins a cloud model.
+      - name: Point the config at the local model
+        run: |
+          sed -i "s|^\([[:space:]]*review:\).*|\1 ${{ inputs.model }}|" .prsentinel.yaml
+          grep -n "review:" .prsentinel.yaml
+
+      # Runs the published image by hand with the same runtime contract the
+      # platform gives a container action: inputs as environment variables, a
+      # workspace to read the config from and write out/ into.
+      - name: Review PR #${{ inputs.pr-number }} with the bundled model
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p out .prsentinel-smoke-cache
+          started=$(date +%s)
+
+          docker run --rm \
+            -v "$PWD:/github/workspace" \
+            -w /github/workspace \
+            -e GITHUB_TOKEN \
+            -e GITHUB_REPOSITORY \
+            -e GITHUB_API_URL \
+            -e GITHUB_EVENT_NAME=pull_request_target \
+            -e GITHUB_WORKSPACE=/github/workspace \
+            -e DRY_RUN=true \
+            -e PR_NUMBER="${{ inputs.pr-number }}" \
+            -e LLM_MODEL="${{ inputs.model }}" \
+            -e PRSENTINEL_LOCAL_THREADS="${{ inputs.threads }}" \
+            -e PRSENTINEL_LOCAL_CACHE=/cache \
+            -v "$PWD/.prsentinel-smoke-cache:/cache" \
+            "ghcr.io/${{ github.repository }}:${{ inputs.image-tag }}" \
+            2>&1 | tee smoke.log
+
+          elapsed=$(( $(date +%s) - started ))
+          {
+            echo "### Local model smoke test"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Model | \`${{ inputs.model }}\` |"
+            echo "| Image tag | \`${{ inputs.image-tag }}\` |"
+            echo "| Threads | ${{ inputs.threads }} |"
+            echo "| Wall clock | ${elapsed}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # A payload on disk is the point of the run: it proves the model produced
+      # a parseable review rather than an empty or garbled response.
+      - name: Report the review payload
+        run: |
+          set -euo pipefail
+          payload=$(ls out/*.json | head -n 1)
+          {
+            echo
+            echo "#### \`${payload}\`"
+            PAYLOAD="$payload" node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              const p = JSON.parse(readFileSync(process.env.PAYLOAD, "utf8"));
+              console.log(`- inline comments: ${p.comments.length}`);
+              console.log(`- walkthrough characters: ${p.body.trim().length}`);
+            '
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the payload and log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-local-model-pr${{ inputs.pr-number }}
+          path: |
+            out/
+            smoke.log
+          if-no-files-found: error

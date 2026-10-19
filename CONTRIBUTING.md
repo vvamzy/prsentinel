@@ -15,8 +15,8 @@ npm test
 npm run build
 ```
 
-Node 20+ is required. The test suite runs without network access and without an
-API key.
+Node 22+ is required (see `engines` in `package.json`). The test suite runs
+without network access and without an API key.
 
 ## Branches
 
@@ -38,6 +38,7 @@ git push origin dev
 ```
 src/
   index.ts            entry point; routes on the GitHub event
+  env.ts              input + environment resolution (testable on its own)
   pipeline.ts         the review pipeline (gather → map → reduce → filter)
   chat.ts             review-thread replies
   config.ts           .prsentinel.yaml schema, glob/path-filter logic
@@ -145,6 +146,42 @@ The last thing the harness prints is a check that every comment anchors to a
 line that genuinely exists in the diff. Treat a non-zero exit there as a bug,
 because it is: that is the failure that produces a 422 from GitHub, or worse, a
 comment on unrelated code.
+
+## The container and the bundled model
+
+The Docker action is what users actually run, and two things about it cannot be
+validated any other way. Both are cheap enough to run on every change:
+
+- `scripts/verify-local-model.sh` starts the bundled `llama-server` inside the
+  built image against a 1 MB test model and calls `/v1/chat/completions`. It runs
+  in CI (`Docker image builds`). To run it against a local image:
+
+  ```bash
+  docker build -t prsentinel-action .
+  docker run --rm -i --entrypoint /bin/sh prsentinel-action < scripts/verify-local-model.sh
+  ```
+
+- **Local model smoke test** (Actions → *Local model smoke test* → Run workflow)
+  does a real dry-run review with a bundled model and reports wall-clock time,
+  comment count, and walkthrough length. This is the only way to see what a
+  bundled 7B costs on a free runner. Use it after changing `src/llm/local.ts` or
+  the Dockerfile.
+
+Three things in the Dockerfile are load-bearing and will bite anyone who tidies
+them away:
+
+- `llama-server` must stay in the same directory as its `.so` files. `ggml` finds
+  its CPU backend by scanning the directory of its own executable, so scattering
+  the libraries into `/usr/local/lib` makes the backend disappear — and it can be
+  skipped without an error line, so the symptom is a puzzling `(none)` device
+  list rather than a failure.
+- The runtime base must be glibc. The prebuilt llama.cpp binaries do not run on
+  musl.
+- `libgomp1` is not in the `ubuntu` base image but llama.cpp links the GNU OpenMP
+  runtime, so it must be installed explicitly.
+
+CI publishes the image to GHCR (`.github/workflows/publish.yml`). The action
+still builds from the `Dockerfile`; the published image is additive.
 
 ## Pull requests
 

@@ -167,7 +167,7 @@ that a later run trusts. To keep them between runs, point `local-model-cache` at
 an `actions/cache` directory:
 
 ```yaml
-- uses: actions/cache@v4
+- uses: actions/cache@v6
   with:
     path: .prsentinel/models
     key: prsentinel-model-${{ hashFiles('.prsentinel.yaml') }}
@@ -179,6 +179,10 @@ an `actions/cache` directory:
 
 See [ROADMAP.md](ROADMAP.md) for the alternative — a warm server on your own
 hardware — and why it is not the bundled default.
+
+`llm-model` is not the only thing that chooses a model: `models.review` in
+`.prsentinel.yaml` wins over it. If both are set and disagree, prsentinel says so
+in the log rather than quietly ignoring one of them.
 
 ## Commands
 
@@ -354,14 +358,62 @@ caps it from several directions:
 
 Use `dry-run: true` to see exactly what would be posted, for free.
 
+## Container image
+
+The action is a Docker container action, so GitHub builds it from the
+`Dockerfile` on every job. CI also publishes a prebuilt image to the GitHub
+Container Registry if you would rather pull one:
+
+```bash
+docker pull ghcr.io/vvamzy/prsentinel:main
+```
+
+| Tag | Tracks |
+|---|---|
+| `main` | The current release. |
+| `dev` | The integration branch, ahead of `main`. |
+| `sha-<short>` | A single commit. |
+| `v1`, `v1.2`, `v1.2.3` | Release tags, once `v1` exists. |
+
+Tags are explicit rather than `latest`-based, because the default branch is
+`dev` — an automatic `latest` would track unreleased code.
+
+The image is additive: the action still builds from its own `Dockerfile`, which
+is what keeps `.github/workflows/self-test.yml` honest, since `uses: ./`
+compiles the exact revision it checked out.
+
+Every input has an environment fallback, so the image can also be driven
+directly:
+
+```bash
+docker run --rm \
+  -v "$PWD:/github/workspace" -w /github/workspace \
+  -e GITHUB_WORKSPACE=/github/workspace \
+  -e GITHUB_TOKEN -e GITHUB_REPOSITORY \
+  -e DRY_RUN=true -e PR_NUMBER=123 \
+  -e LLM_MODEL=local/qwen2.5-coder-7b-instruct \
+  ghcr.io/vvamzy/prsentinel:main
+```
+
 ## Development
 
 ```bash
 npm ci
 npm run typecheck
-npm test          # 149 tests, no network required
+npm test          # no network required
 npm run build
 ```
+
+Two checks cover things the unit tests cannot. Both are documented in
+[CONTRIBUTING.md](CONTRIBUTING.md):
+
+- `scripts/verify-local-model.sh` runs in CI on every change. It starts the
+  bundled server inside the built image against a 1 MB test model and speaks the
+  real `/v1/chat/completions` route. Run it locally against a local image with
+  `docker build -t prsentinel-action . && docker run --rm -i --entrypoint /bin/sh prsentinel-action < scripts/verify-local-model.sh`.
+- The **Local model smoke test** workflow (manual dispatch) runs a real dry-run
+  review with a bundled model and reports wall-clock time and payload size. This
+  is the only measurement of what a bundled 7B actually costs on a free runner.
 
 The test suite includes an end-to-end pipeline test with a stub LLM, so you can
 iterate on prompts and filtering without spending a cent.

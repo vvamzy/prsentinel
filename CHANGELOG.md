@@ -17,6 +17,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   never mistaken for a complete one.
 - **`local-model-cache` input** to point the weight cache at an
   `actions/cache` directory.
+- **Container image published to GHCR** (`publish.yml`), tagged per branch
+  (`main`, `dev`), per commit, and per semantic version. The action still builds
+  from its own `Dockerfile` — that is what keeps `uses: ./` dogfooding honest, so
+  the image is an additive path for anyone who would rather pull than build. Tags
+  are explicit rather than `latest`-based, because the default branch is `dev`
+  and an automatic `latest` would track unreleased code.
+- **A reproducible local-model smoke test**
+  (`.github/workflows/local-model-smoke.yml`, manual dispatch): pulls the
+  published image, points the repository's config at a bundled model, runs a real
+  dry-run review of a chosen pull request, caches the weights, and reports
+  wall-clock time, the comment count, and the walkthrough length. This is the
+  only thing that measures what a bundled model actually costs on a free runner.
+- **`scripts/verify-local-model.sh`**: starts the bundled server inside the built
+  image against a 1 MB test model and speaks the real `/v1/chat/completions`
+  route. It runs on every change (as the `Docker image builds` job) and locally
+  against a local image, with no model weights to download.
 - **`ROADMAP.md`**, recording the self-hosted-inference-server path and the
   larger-runner/GPU option, with the reasons each is not built yet.
 - **Live-PR harness**: `npm run dev:pr -- owner/repo#123` fetches a real pull
@@ -81,7 +97,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **In-process cost controls**: files are filtered *before* any model call.
 - **Security guard** (`scripts/check-pr-target-safety.mjs`) that fails CI if a
   privileged workflow checks out PR head code.
-- **237 tests**, including an end-to-end pipeline test with a stub LLM and an
+- **257 tests**, including an end-to-end pipeline test with a stub LLM and an
   offline fixture harness (`npm run dev:review`).
 - Docker container action, Apache-2.0 licensed.
 
@@ -98,8 +114,28 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `actions/setup-node@v7`). `checkout` v7 also refuses to check out a fork PR
   under `pull_request_target` or `workflow_run`, which prsentinel never does —
   a second line of defence behind the safety guard.
+- **`pr-number` accepts `PR_NUMBER` from the environment**, like every other
+  input. It was the only one without a fallback, which left the container
+  impossible to drive by hand outside Actions.
+- **Input and environment resolution moved to `src/env.ts`** so it can be tested
+  without executing the action — `index.ts` runs `main()` on import, which is
+  right for an entry point and useless for a unit test.
 
 ### Fixed
+- **`config-path` did nothing.** `action.yml`, the README, and the reusable
+  workflow all advertised `config-path`, but the code read an *undeclared*
+  `repo-root` input, so the documented knob was silently ignored and the
+  repository root always fell back to `GITHUB_WORKSPACE`.
+- **The bundled inference server could not start.** The runtime image was missing
+  `libgomp.so.1` — llama.cpp links the GNU OpenMP runtime — so every `local/…`
+  model died at launch with an unresolved-library error.
+- **The Docker check could not fail.** It ran `llama-server --help` under
+  `|| true` and asserted only that the output was non-empty, so the crash message
+  above satisfied it and a completely broken image reported success. It now
+  rejects an unresolved-library message and, more to the point, runs real
+  inference. `ldd` was misleading for the same reason: it exits 0 with a
+  dependency missing, so the Dockerfile now reads its output rather than trusting
+  its status.
 - **The CI smoke test failed on every pull request.** `Verify the bundle runs`
   executed the bundle against the ambient GitHub event, so under `pull_request`
   it correctly started reviewing the PR and then died on credentials that CI
