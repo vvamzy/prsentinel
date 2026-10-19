@@ -165,7 +165,24 @@ validated any other way. Both are cheap enough to run on every change:
   does a real dry-run review with a bundled model and reports wall-clock time,
   comment count, and walkthrough length. This is the only way to see what a
   bundled 7B costs on a free runner. Use it after changing `src/llm/local.ts` or
-  the Dockerfile.
+  the Dockerfile. It defaults to `max-files: 3`, because local inference is
+  serialized and a full pull request would outlast the job; raise it — and the
+  timeout — only when you mean to measure the whole thing. It **fails** if the
+  pipeline logs that it dropped a file, so a green run means every selected file
+  was actually reviewed.
+
+A bundled model is served by a single `llama-server` slot (`--parallel 1`) on a
+runner with no GPU, so one call can take minutes. Two rules follow, and they are
+enforced in code rather than left to callers:
+
+- **Stream.** `OpenAICompatProvider` asks a server on loopback to stream, so the
+  response headers arrive immediately. A non-streaming response sends nothing at
+  all until the whole completion exists, and `fetch` abandons a request that has
+  produced no headers for 300 seconds — which is how the first local run lost 12
+  of 14 files while still reporting success.
+- **Do not fan out.** `LLM.concurrency` returns 1 for anything on loopback, and
+  `mapPhase` sizes its worker pool from it. A request queued behind the single
+  slot receives no bytes while it waits, so it trips the same timeout.
 
 Three things in the Dockerfile are load-bearing and will bite anyone who tidies
 them away:

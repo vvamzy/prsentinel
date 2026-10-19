@@ -57,7 +57,9 @@ export async function mapPhase(
   signal?: AbortSignal,
 ): Promise<FileAnalysis[]> {
   const languageHint = config.language;
-  const concurrency = Math.min(6, Math.max(1, gathered.files.length));
+  // A server on loopback serves one request at a time, so the facade caps this
+  // at 1 rather than letting six calls queue behind a single slot.
+  const concurrency = Math.min(llm.concurrency(model), Math.max(1, gathered.files.length));
 
   const results = await mapWithConcurrency(gathered.files, concurrency, async (file) => {
     if (signal?.aborted) {

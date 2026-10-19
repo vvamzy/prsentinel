@@ -70,12 +70,17 @@ export function resolveProvider(
   const baseUrl =
     creds.baseUrl ?? COMPAT_HOSTS[prefix] ?? 'https://api.openai.com/v1';
 
-  const provider = new OpenAICompatProvider(creds.apiKey, baseUrl, creds.extraHeaders);
+  const provider = new OpenAICompatProvider(creds.apiKey, baseUrl, creds.extraHeaders, {
+    stream: isLoopbackUrl(baseUrl),
+  });
 
   // For prefixed ids we strip the prefix before sending; for unprefixed
   // ids (e.g. `gpt-4o-mini`) the model string is already correct.
   return { provider, model: prefix === '' ? bareModel : bareModel };
 }
+
+/** Concurrent requests a hosted API is willing to take. */
+export const DEFAULT_CONCURRENCY = 6;
 
 /**
  * A thin facade the review pipeline talks to. It owns routing and retries
@@ -87,6 +92,49 @@ export class LLM {
   async complete(model: string, req: Omit<CompleteRequest, 'model'>): Promise<CompleteResult> {
     const { provider, model: resolved } = resolveProvider(model, this.creds);
     return provider.complete({ ...req, model: resolved });
+  }
+
+  /**
+   * How many requests this model's server can usefully take at once.
+   *
+   * Fanning out to a server on loopback is not merely useless, it is harmful:
+   * the server holds a request in its queue without sending a byte, and the
+   * client abandons a request that has produced no response headers for 300
+   * seconds. That is how a 14-file review came back with 12 files missing.
+   * Hosted APIs are built to fan out, so they keep the default.
+   */
+  concurrency(model: string): number {
+    const slash = model.indexOf('/');
+    const prefix = slash === -1 ? '' : model.slice(0, slash);
+    if (prefix === 'local') return 1;
+    const baseUrl = this.creds.baseUrl ?? COMPAT_HOSTS[prefix];
+    return baseUrl !== undefined && isLoopbackUrl(baseUrl) ? 1 : DEFAULT_CONCURRENCY;
+  }
+}
+
+/**
+ * True when the base URL points at this machine.
+ *
+ * A server on loopback is one running beside the action — the bundled
+ * `local/…` models, and the self-hosted Ollama/vLLM setups the README suggests.
+ * Two things follow, and both are why this is checked rather than configured:
+ *
+ *   - Latency is unbounded (a CPU-only runner, or the user's own hardware), so
+ *     responses are streamed to keep the connection alive.
+ *   - Extra client concurrency buys nothing, because such a server serves one
+ *     request at a time. `LLM.concurrency` reads the same signal.
+ */
+export function isLoopbackUrl(url: string): boolean {
+  try {
+    const { hostname } = new URL(url);
+    return (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '::1' ||
+      hostname === '[::1]'
+    );
+  } catch {
+    return false;
   }
 }
 

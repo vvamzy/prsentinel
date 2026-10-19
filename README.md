@@ -157,10 +157,15 @@ Nothing is sent to a third party, and `llm-api-key` is not required.
 | `local/qwen2.5-coder-1.5b-instruct` | ~1.0 GB | Fastest. Expect noise. |
 
 > **Read this before choosing it.** A free GitHub-hosted runner is 4 vCPU with
-> no GPU, so a 7B model generates a few tokens per second and a whole review can
-> take 5–10 minutes. On quality it is plainly below `gpt-4o-mini`, which costs
-> about $0.15 per million input tokens. Use it when *privacy or zero cost*
-> matters more than speed and precision — not as a default.
+> no GPU, so a 7B model generates a few tokens per second and asks for minutes
+> per file. Measured directly with the bundled smoke test: of 14 files, only **2**
+> produced a result inside a 300-second budget. prsentinel therefore streams from
+> a local server and reviews **one file at a time** — concurrency cannot help,
+> because that is all a single-slot server can do anyway — so budget a few minutes
+> per file and expect a 20-file pull request to take most of an hour. On quality
+> it is plainly below `gpt-4o-mini`, which costs about $0.15 per million input
+> tokens. Use it when *privacy or zero cost* matters more than speed and
+> precision — not as a default.
 
 Weights are cached and checksummed; a killed job never leaves a half-download
 that a later run trusts. To keep them between runs, point `local-model-cache` at
@@ -377,6 +382,12 @@ docker pull ghcr.io/vvamzy/prsentinel:main
 
 Tags are explicit rather than `latest`-based, because the default branch is
 `dev` — an automatic `latest` would track unreleased code.
+
+To measure what a bundled model actually costs on a free runner, dispatch the
+manual **Local model smoke test** workflow: it pulls this image, reviews a real
+pull request with a chosen `local/…` model, and reports wall-clock time and
+findings. It fails if any file is dropped, so a green run means the review really
+happened.
 
 The image is additive: the action still builds from its own `Dockerfile`, which
 is what keeps `.github/workflows/self-test.yml` honest, since `uses: ./`

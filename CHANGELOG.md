@@ -29,6 +29,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   dry-run review of a chosen pull request, caches the weights, and reports
   wall-clock time, the comment count, and the walkthrough length. This is the
   only thing that measures what a bundled model actually costs on a free runner.
+  `max-files` (default 3) bounds the run, because a local model is served one
+  request at a time and a whole pull request is an hour rather than a smoke test.
 - **`scripts/verify-local-model.sh`**: starts the bundled server inside the built
   image against a 1 MB test model and speaks the real `/v1/chat/completions`
   route. It runs on every change (as the `Docker image builds` job) and locally
@@ -97,7 +99,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **In-process cost controls**: files are filtered *before* any model call.
 - **Security guard** (`scripts/check-pr-target-safety.mjs`) that fails CI if a
   privileged workflow checks out PR head code.
-- **257 tests**, including an end-to-end pipeline test with a stub LLM and an
+- **275 tests**, including an end-to-end pipeline test with a stub LLM and an
   offline fixture harness (`npm run dev:review`).
 - Docker container action, Apache-2.0 licensed.
 
@@ -120,8 +122,27 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **Input and environment resolution moved to `src/env.ts`** so it can be tested
   without executing the action — `index.ts` runs `main()` on import, which is
   right for an entry point and useless for a unit test.
+- **Responses from a server on loopback are streamed, and no longer fanned out.**
+  A local model has unbounded latency and serves one request at a time, so
+  concurrency bought nothing and cost a lot. `LLM.concurrency` now returns 1 for a
+  bundled `local/…` model and for any loopback `llm-base-url` (`localhost`,
+  `127.0.0.1`, `[::1]` — which covers the Ollama and vLLM defaults), and the
+  hosted default of 6 everywhere else.
 
 ### Fixed
+- **Bundled local models skipped most of the files and reported success.** A
+  single map call on a 7B model takes longer than five minutes on a free 4 vCPU
+  runner, and a non-streaming completion sends no bytes at all until the whole
+  thing has been generated — so Node's `fetch` abandoned the request at its
+  300-second response-headers timeout, the pipeline logged `TypeError: fetch
+  failed`, dropped that file, and carried on. The first real run of the smoke test
+  reviewed **2 of 14 files** and went green. Loopback responses are now streamed:
+  the headers arrive immediately and the body keeps the connection alive token by
+  token, so a slow local model can take as long as it needs.
+- **`TypeError: fetch failed` said nothing about what had failed.** `fetch`
+  reports every transport error — timeout, reset, refused connection — the same
+  way, and buries the reason in `cause`. Error messages now include it, which is
+  what turned the run above from a mystery into a diagnosis.
 - **`config-path` did nothing.** `action.yml`, the README, and the reusable
   workflow all advertised `config-path`, but the code read an *undeclared*
   `repo-root` input, so the documented knob was silently ignored and the

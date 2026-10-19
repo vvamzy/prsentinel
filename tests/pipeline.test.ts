@@ -103,6 +103,8 @@ const stubLLM = {
   async complete(model: string, req: any) {
     return new StubProvider().complete({ ...req, model });
   },
+  // A hosted-model fan-out; `mapPhase` reads this to size its worker pool.
+  concurrency: () => 6,
 } as any;
 
 function makeGathered(): GatheredPr {

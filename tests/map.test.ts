@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { normalizeFindings } from '../src/review/map.js';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { mapPhase, normalizeFindings, type GatheredPr } from '../src/review/map.js';
 import { chunkPatch } from '../src/review/chunker.js';
+import { DEFAULT_CONFIG } from '../src/config.js';
+import { LLM } from '../src/llm/registry.js';
 
 describe('normalizeFindings', () => {
   it('keeps a well-formed finding', () => {
@@ -99,5 +101,69 @@ describe('chunkPatch', () => {
 
   it('returns empty for an unparseable patch', () => {
     expect(chunkPatch('not a patch', 100)).toEqual([]);
+  });
+});
+
+describe('mapPhase concurrency', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const gathered: GatheredPr = {
+    title: 't',
+    body: 'b',
+    headSha: 'h',
+    baseSha: 'b',
+    number: 1,
+    files: ['a.ts', 'b.ts', 'c.ts', 'd.ts'].map((filename) => ({
+      filename,
+      status: 'modified',
+      patch: null,
+      changes: 1,
+    })),
+    contexts: new Map(),
+    skipped: [],
+  };
+
+  /** Answer every request, recording how many were in flight at once. */
+  function stubCountingFetch(peak: { value: number }): void {
+    let active = 0;
+    vi.stubGlobal('fetch', async () => {
+      active++;
+      peak.value = Math.max(peak.value, active);
+      await new Promise((r) => setTimeout(r, 5));
+      active--;
+      const frame = `data: ${JSON.stringify({
+        choices: [{ delta: { content: '{"summary":"s","findings":[]}' } }],
+      })}\n\ndata: [DONE]\n\n`;
+      return new Response(frame, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    });
+  }
+
+  it('runs one file at a time for a bundled local model', async () => {
+    const peak = { value: 0 };
+    stubCountingFetch(peak);
+
+    const llm = new LLM({ apiKey: 'local', baseUrl: 'http://127.0.0.1:8080/v1' });
+    const analyses = await mapPhase(llm, 'local/qwen2.5-coder-7b-instruct', gathered, DEFAULT_CONFIG);
+
+    // A single-slot server gains nothing from a queue, and a queued request that
+    // has sent no headers for 300 seconds is dropped by the client.
+    expect(peak.value).toBe(1);
+    expect(analyses).toHaveLength(4);
+    expect(analyses[0]?.summary).toBe('s');
+  });
+
+  it('fans out to a hosted API', async () => {
+    const peak = { value: 0 };
+    stubCountingFetch(peak);
+
+    const llm = new LLM({ apiKey: 'k' });
+    await mapPhase(llm, 'openai/gpt-4o-mini', gathered, DEFAULT_CONFIG);
+
+    expect(peak.value).toBeGreaterThan(1);
   });
 });
