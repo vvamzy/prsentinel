@@ -56,7 +56,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha }}
 
-      - uses: your-org/prsentinel@v1
+      - uses: vvamzy/prsentinel@v1
         with:
           # Recommended: post as <your-app>[bot]. See "Register the GitHub App".
           app-id: ${{ secrets.APP_ID }}
@@ -151,7 +151,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.repository.default_branch }}
-      - uses: your-org/prsentinel@v1
+      - uses: vvamzy/prsentinel@v1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           llm-api-key: ${{ secrets.LLM_API_KEY }}

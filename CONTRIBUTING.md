@@ -7,7 +7,7 @@ about **filtering quality** — not prompt wording.
 ## Getting started
 
 ```bash
-git clone https://github.com/your-org/prsentinel
+git clone https://github.com/vvamzy/prsentinel
 cd prsentinel
 npm ci
 npm run typecheck
