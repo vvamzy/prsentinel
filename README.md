@@ -158,14 +158,18 @@ Nothing is sent to a third party, and `llm-api-key` is not required.
 
 > **Read this before choosing it.** A free GitHub-hosted runner is 4 vCPU with
 > no GPU, so a 7B model generates a few tokens per second and asks for minutes
-> per file. Measured directly with the bundled smoke test: of 14 files, only **2**
-> produced a result inside a 300-second budget. prsentinel therefore streams from
-> a local server and reviews **one file at a time** — concurrency cannot help,
-> because that is all a single-slot server can do anyway — so budget a few minutes
-> per file and expect a 20-file pull request to take most of an hour. On quality
-> it is plainly below `gpt-4o-mini`, which costs about $0.15 per million input
-> tokens. Use it when *privacy or zero cost* matters more than speed and
-> precision — not as a default.
+> per file. Measured with the bundled smoke test: 3 files analysed and
+> summarised in **12 minutes** on 4 vCPU, more than half of it the reduce step.
+> Local reviews run **one file at a time** — that is all a single-slot server
+> can do — so budget roughly a minute per file plus the summary, and expect a
+> 20-file pull request to take most of an hour.
+>
+> On quality it is plainly below `gpt-4o-mini`, which costs about $0.15 per
+> million input tokens. In that same run **five of the six findings were
+> wrong**: the model reported that a changelog did not state the default model
+> size on the very line that stated it, and that a file had trailing whitespace
+> it did not have. Use a local model when *privacy or zero cost* matters more
+> than speed and precision — not as a default.
 
 Weights are cached and checksummed; a killed job never leaves a half-download
 that a later run trusts. To keep them between runs, point `local-model-cache` at

@@ -207,6 +207,7 @@ export async function runReview(opts: ReviewOptions): Promise<ReviewOutcome> {
     dropped_duplicate: filtered.stats.droppedDuplicate,
     dropped_cap: filtered.stats.droppedCap,
     suppressed_style: filtered.stats.suppressedStyle,
+    stripped_prose_suggestion: filtered.stats.strippedProseSuggestion,
   });
 
   const finalPlan: ReviewPlan = { ...plan, findings: filtered.findings };

@@ -99,7 +99,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **In-process cost controls**: files are filtered *before* any model call.
 - **Security guard** (`scripts/check-pr-target-safety.mjs`) that fails CI if a
   privileged workflow checks out PR head code.
-- **275 tests**, including an end-to-end pipeline test with a stub LLM and an
+- **280 tests**, including an end-to-end pipeline test with a stub LLM and an
   offline fixture harness (`npm run dev:review`).
 - Docker container action, Apache-2.0 licensed.
 
@@ -128,6 +128,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   bundled `local/…` model and for any loopback `llm-base-url` (`localhost`,
   `127.0.0.1`, `[::1]` — which covers the Ollama and vLLM defaults), and the
   hosted default of 6 everywhere else.
+- **The map prompt asks the model to check its own claims.** A bundled 7B on the
+  first real local run reported that a changelog "does not specify the default
+  size" on the very line that specified it, and that a file had trailing
+  whitespace it did not have. The prompt now says to read the changed lines back
+  before reporting, to leave whitespace to the linter, and to answer a suggestion
+  with replacement code or nothing.
 
 ### Fixed
 - **Bundled local models skipped most of the files and reported success.** A
@@ -143,6 +149,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   reports every transport error — timeout, reset, refused connection — the same
   way, and buries the reason in `cause`. Error messages now include it, which is
   what turned the run above from a mystery into a diagnosis.
+- **A prose "suggestion" was posted as an applicable change.** GitHub renders a
+  ```suggestion block as a change the reader can apply, so a model that answered
+  "remove the trailing whitespace" instead of writing the replacement code would
+  have replaced the commented line with that sentence. A suggestion that is prose
+  is now stripped from code files — documentation is exempt, because there prose
+  *is* the content — and the finding keeps its explanation.
 - **`config-path` did nothing.** `action.yml`, the README, and the reusable
   workflow all advertised `config-path`, but the code read an *undeclared*
   `repo-root` input, so the documented knob was silently ignored and the

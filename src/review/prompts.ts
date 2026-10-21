@@ -20,16 +20,22 @@ You review pull requests for real defects, not style opinions.
 Rules:
 - Only report problems you are confident about. A wrong comment costs a
   reviewer more than a missed nit.
+- Read the changed lines back before you report. If they already do what you
+  are about to ask for — or already document what you say is missing — there is
+  nothing to report.
 - Every finding MUST reference a line number that appears in the annotated
   patch. Never invent line numbers.
 - Prefer findings in the changed code. Do not review unchanged lines except
   to explain how a change breaks existing behavior.
 - Do not report formatting, naming, or linting issues that an existing
   linter would catch. Assume the repo has a linter unless told otherwise.
+  Whitespace is a linter's job, never yours.
 - Do not suggest adding logs, comments, or types unless the absence causes a
   concrete bug.
 - A suggestion must be a drop-in replacement for the exact lines it spans.
   It must compile and preserve behavior outside the stated problem.
+- A suggestion is code, never prose. If you cannot write the replacement code,
+  set the suggestion to null and put the advice in the body.
 
 Severity guide:
 - critical: security vulnerability, data loss, crash, or logic error that
@@ -120,7 +126,8 @@ export const MAP_SCHEMA: Record<string, unknown> = {
           body: { type: 'string', description: 'Markdown explaining the problem.' },
           suggestion: {
             type: ['string', 'null'],
-            description: 'Replacement code for start_line..line, else null.',
+            description:
+              'Replacement code for start_line..line, else null. Code only — never prose.',
           },
           confidence: { type: 'number', description: '0..1' },
         },

@@ -17,6 +17,8 @@ import type { ChangedFile } from './map.js';
  *   4. Linter detection — if the repo already lints, suppress style nits.
  *   5. Caps — per-file and per-PR ceilings.
  *   6. Dedupe — collapse near-identical findings.
+ *   7. Suggestion validity — a suggestion is code, not prose, or GitHub would
+ *      offer to replace the developer's line with a sentence.
  */
 
 export interface FilterResult {
@@ -32,6 +34,8 @@ export interface FilterResult {
     droppedDuplicate: number;
     droppedCap: number;
     suppressedStyle: number;
+    /** Findings whose suggestion was prose, and so was not a suggestion. */
+    strippedProseSuggestion: number;
   };
 }
 
@@ -122,6 +126,7 @@ export function filterFindings(
     droppedDuplicate: 0,
     droppedCap: 0,
     suppressedStyle: 0,
+    strippedProseSuggestion: 0,
   };
 
   const respectLinters = config.reviews.respect_linters && detectLinters(allPrFiles);
@@ -174,6 +179,24 @@ export function filterFindings(
   }
   working = inHunk;
 
+  // Step 7: a suggestion is code, not prose.
+  //
+  // GitHub renders a ```suggestion block as an applicable change, so a sentence
+  // in one would replace the commented lines with a sentence. A model that was
+  // asked for a drop-in replacement and answered with an instruction has not
+  // made a suggestion, so the suggestion goes and the explanation stays.
+  //
+  // Documentation is the exception: there, prose *is* the content, and a
+  // replacement for a sentence is a sentence.
+  working = working.map((f) => {
+    if (f.suggestion === undefined) return f;
+    if (isDocumentationFile(f.file)) return f;
+    if (!isProse(f.suggestion)) return f;
+    stats.strippedProseSuggestion++;
+    const { suggestion: _prose, ...rest } = f;
+    return rest;
+  });
+
   // Step 6: dedupe by (file, line, category) and by normalized title.
   const seenLine = new Set<string>();
   const seenTitle = new Set<string>();
@@ -221,6 +244,55 @@ export function filterFindings(
 
 function normalizeTitle(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 80);
+}
+
+/**
+ * True when a block of text reads as prose rather than code.
+ *
+ * The test is deliberately conservative: a line only counts as prose when it
+ * reads like a sentence — several words, ending in sentence punctuation, and
+ * free of the punctuation that code is made of. Diff markers and comments are
+ * neither, so a suggestion that is a diff with a sentence wrapped around it
+ * still counts as prose: the sentence is the part that would land in the
+ * developer's file.
+ */
+export function isProse(text: string): boolean {
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  if (lines.length === 0) return false;
+
+  let prose = 0;
+  let code = 0;
+  for (const line of lines) {
+    if (/^[+\-@]/.test(line)) continue;
+    if (/^(?:\/\/|#|\*|\/\*)/.test(line)) continue;
+    if (isSentence(line)) prose++;
+    else code++;
+  }
+  return prose > 0 && code === 0;
+}
+
+/** True when a line reads like an English sentence. */
+function isSentence(line: string): boolean {
+  // A suggestion often ends inside a quotation, so the closing quote is not
+  // part of the sentence's punctuation.
+  const trimmed = line.replace(/["'`)\]}]+$/, '').trim();
+  if (!/[.!?]$/.test(trimmed)) return false;
+  if (trimmed.split(/\s+/).length < 4) return false;
+  // Code does not usually end a line with a full stop after several words.
+  if (/[=;{}[\]]|=>|\b(?:function|const|let|var|return|import|export)\b/.test(trimmed)) return false;
+  return true;
+}
+
+/** Extensions whose content is prose, where a prose replacement is content. */
+const DOCUMENTATION_EXTENSIONS = ['.md', '.markdown', '.mdx', '.rst', '.txt', '.adoc', '.asciidoc'];
+
+/** True for files whose lines are prose rather than code. */
+export function isDocumentationFile(file: string): boolean {
+  const lower = file.toLowerCase();
+  return DOCUMENTATION_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
 /**

@@ -217,3 +217,86 @@ describe('filterFindings', () => {
     expect(r.findings[0]?.line).toBeLessThanOrEqual(5);
   });
 });
+
+describe('prose suggestions', () => {
+  // A README whose added line is itself prose.
+  const DOC_PATCH = `@@ -1,1 +1,2 @@
++The default model is 7B.
++Run it on the runner.`;
+
+  function run(
+    findings: Finding[],
+    file = 'src/a.ts',
+    patch: string | null = PATCH,
+  ) {
+    const files = [makeFile(file, patch)];
+    return filterFindings(findings, {
+      config: DEFAULT_CONFIG,
+      changedFiles: files,
+      parsedByFile: buildPatchIndex(files),
+      allPrFiles: [file],
+    });
+  }
+
+  it('strips a suggestion that is prose, and keeps the finding', () => {
+    const r = run([
+      makeFinding({
+        line: 2,
+        suggestion: 'Remove the trailing whitespace at the end of this line.',
+      }),
+    ]);
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]?.suggestion).toBeUndefined();
+    expect(r.stats.strippedProseSuggestion).toBe(1);
+  });
+
+  it('strips a prose suggestion even when a diff is wrapped around it', () => {
+    // What a small model produced for a real pull request: an instruction, then
+    // a diff that does not match the line it is anchored to.
+    const r = run([
+      makeFinding({
+        line: 2,
+        suggestion:
+          'Remove the trailing whitespace.\n\n@@ -1,2 +1,2 @@\n-const a = 1;\n+const b = 2;',
+      }),
+    ]);
+    expect(r.findings[0]?.suggestion).toBeUndefined();
+    expect(r.stats.strippedProseSuggestion).toBe(1);
+  });
+
+  it('keeps a suggestion that is code', () => {
+    const r = run([makeFinding({ line: 2, suggestion: 'const b = 3;' })]);
+    expect(r.findings[0]?.suggestion).toBe('const b = 3;');
+    expect(r.stats.strippedProseSuggestion).toBe(0);
+  });
+
+  it('keeps a prose suggestion in a documentation file', () => {
+    // In a README, prose *is* the content, so a sentence is a valid
+    // replacement for a sentence.
+    const r = run(
+      [
+        makeFinding({
+          file: 'README.md',
+          line: 1,
+          suggestion: 'The default model is 3B.',
+        }),
+      ],
+      'README.md',
+      DOC_PATCH,
+    );
+    expect(r.findings[0]?.suggestion).toBe('The default model is 3B.');
+    expect(r.stats.strippedProseSuggestion).toBe(0);
+  });
+
+  it('strips a prose suggestion that ends inside a quotation', () => {
+    const r = run([
+      makeFinding({
+        line: 2,
+        suggestion:
+          "Update the documentation to state the default. For example: 'The default model is 3B, because the runner has 4 vCPU.'",
+      }),
+    ]);
+    expect(r.findings[0]?.suggestion).toBeUndefined();
+    expect(r.stats.strippedProseSuggestion).toBe(1);
+  });
+});
