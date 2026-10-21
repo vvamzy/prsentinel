@@ -38,41 +38,8 @@ class StubProvider implements LLMProvider {
         parsed: {
           walkthrough: 'Adds a new dependency `b` and returns the sum.',
           file_summaries: [{ file: 'src/a.ts', summary: 'Imports b and returns a + b.' }],
-          findings: [
-            {
-              file: 'src/a.ts',
-              line: 5,
-              start_line: null,
-              severity: 'major',
-              category: 'bug',
-              title: 'B may be undefined',
-              body: '`b` is imported but never validated.',
-              suggestion: 'return a + (b ?? 0);',
-              confidence: 0.92,
-            },
-            {
-              file: 'src/a.ts',
-              line: 999, // out of hunk → must be filtered
-              start_line: null,
-              severity: 'info',
-              category: 'docs',
-              title: 'Ghost finding',
-              body: 'Should be dropped.',
-              suggestion: null,
-              confidence: 0.99,
-            },
-            {
-              file: 'src/a.ts',
-              line: 2,
-              start_line: null,
-              severity: 'style',
-              category: 'style',
-              title: 'Low confidence nit',
-              body: 'Should be dropped by threshold.',
-              suggestion: null,
-              confidence: 0.2,
-            },
-          ],
+          // The reduce phase judges findings by id; it does not write them out.
+          drop: [],
         },
         usage: { input: 10, output: 10 },
       };
@@ -91,6 +58,26 @@ class StubProvider implements LLMProvider {
             body: '`b` is imported but never validated.',
             suggestion: 'return a + (b ?? 0);',
             confidence: 0.92,
+          },
+          {
+            line: 999, // out of hunk → must be filtered
+            start_line: null,
+            severity: 'info',
+            category: 'docs',
+            title: 'Ghost finding',
+            body: 'Should be dropped.',
+            suggestion: null,
+            confidence: 0.99,
+          },
+          {
+            line: 2,
+            start_line: null,
+            severity: 'minor',
+            category: 'style',
+            title: 'Low confidence nit',
+            body: 'Should be dropped by threshold.',
+            suggestion: null,
+            confidence: 0.2,
           },
         ],
       },
@@ -173,8 +160,7 @@ describe('pipeline (map → reduce → filter → payload)', () => {
     expect(body).toContain('return a + (b ?? 0);');
   });
 
-  it('is deterministic: two runs produce identical payloads', async () => {
-    const config = parseConfig('');
+  it('is deterministic: two runs produce identical payloads', async () => {    const config = parseConfig('');
     const runOnce = async () => {
       const gathered = makeGathered();
       const analyses = await mapPhase(stubLLM, 'm', gathered, config);
@@ -195,5 +181,81 @@ describe('pipeline (map → reduce → filter → payload)', () => {
       });
     };
     expect(JSON.stringify(await runOnce())).toBe(JSON.stringify(await runOnce()));
+  });
+});
+
+describe('reduce phase (judge by id, do not rewrite)', () => {
+  const gathered = (): GatheredPr => ({
+    title: 'Add b',
+    body: '',
+    headSha: 'abcdef1234567890',
+    baseSha: '1234567890abcdef',
+    number: 7,
+    files: [{ filename: 'src/a.ts', status: 'modified', patch: PATCH, changes: 3 }],
+    contexts: new Map(),
+    skipped: [],
+  });
+
+  /** A facade whose reduce answer is fixed, whatever it is asked for. */
+  function llmReturning(reduce: unknown): LLMFacade {
+    return {
+      async complete(_model: string, req: any) {
+        if (req.schema && 'walkthrough' in (req.schema as any).properties) {
+          return { text: '', parsed: reduce, usage: { input: 1, output: 1 } };
+        }
+        return new StubProvider().complete({ ...req, model: 'stub' });
+      },
+      concurrency: () => 1,
+    };
+  }
+
+  async function reduceWith(reduce: unknown) {
+    const g = gathered();
+    const config = parseConfig('');
+    const analyses = await mapPhase(llmReturning(reduce), 'stub/model', g, config);
+    return reducePhase(llmReturning(reduce), 'stub/model', {
+      prTitle: g.title,
+      prBody: g.body,
+      analyses,
+    });
+  }
+
+  it('drops the findings the model names by id', async () => {
+    const reduced = await reduceWith({
+      walkthrough: 'A walkthrough.',
+      file_summaries: [],
+      drop: ['F2'],
+    });
+    // The map phase produced three findings; the model dropped the second.
+    expect(reduced.findings).toHaveLength(2);
+    expect(reduced.findings.map((f) => f.title)).not.toContain('Ghost finding');
+    expect(reduced.findings[0]?.title).toBe('B may be undefined');
+  });
+
+  it('keeps every finding when the model names none', async () => {
+    const reduced = await reduceWith({
+      walkthrough: 'A walkthrough.',
+      file_summaries: [],
+      drop: [],
+    });
+    expect(reduced.findings).toHaveLength(3);
+  });
+
+  it('ignores ids that do not exist', async () => {
+    const reduced = await reduceWith({
+      walkthrough: 'A walkthrough.',
+      file_summaries: [],
+      drop: ['F99', 'not-an-id'],
+    });
+    expect(reduced.findings).toHaveLength(3);
+  });
+
+  it('keeps the findings when the response was cut off before the drop list', async () => {
+    // A truncated answer must not silently delete a real finding.
+    const reduced = await reduceWith({
+      walkthrough: 'A walkthrough that stops mid',
+      file_summaries: [],
+    });
+    expect(reduced.findings).toHaveLength(3);
   });
 });

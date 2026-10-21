@@ -95,9 +95,12 @@ export function reduceUserPrompt(params: {
   parts.push(`--- Candidate findings (JSON) ---\n${params.findingsJson}`);
   parts.push(
     'Produce: (1) a walkthrough of what the PR does and anything a reviewer must check, ' +
-      '(2) the final de-duplicated finding set. Drop findings that are duplicates, ' +
-      'speculative, or low-confidence. Re-rank by severity. Keep the walkthrough ' +
-      'short — a few paragraphs, not a page.',
+      '(2) a list of the finding ids to remove.\n\n' +
+      'Each candidate finding has an id. List in `drop` only the ids of findings that ' +
+      'are duplicates of another finding, speculative, or low-confidence. Keep every ' +
+      'other finding exactly as it is — do not rewrite it, and do not write the ' +
+      'findings out again. If nothing should be removed, `drop` is an empty array.\n\n' +
+      'Keep the walkthrough short — a few paragraphs, not a page.',
   );
   return parts.join('\n\n');
 }
@@ -143,7 +146,16 @@ export const MAP_SCHEMA: Record<string, unknown> = {
   required: ['summary', 'findings'],
 };
 
-/** JSON Schema for the REDUCE phase. */
+/**
+ * JSON Schema for the REDUCE phase.
+ *
+ * The reduce phase judges; it does not rewrite. It returns the walkthrough, a
+ * summary per file, and the ids of the findings to remove. Echoing the
+ * findings back in full was the single largest thing it asked a model to
+ * write — on a CPU-only runner that is minutes of generation per review, and a
+ * model asked to repeat a finding will happily rewrite it into something
+ * different.
+ */
 export const REDUCE_SCHEMA: Record<string, unknown> = {
   type: 'object',
   additionalProperties: false,
@@ -164,30 +176,14 @@ export const REDUCE_SCHEMA: Record<string, unknown> = {
         required: ['file', 'summary'],
       },
     },
-    findings: {
+    drop: {
       type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          file: { type: 'string' },
-          line: { type: 'integer' },
-          start_line: { type: ['integer', 'null'] },
-          severity: { type: 'string', enum: ['critical', 'major', 'minor', 'info'] },
-          category: {
-            type: 'string',
-            enum: ['bug', 'security', 'performance', 'maintainability', 'style', 'test', 'docs'],
-          },
-          title: { type: 'string' },
-          body: { type: 'string' },
-          suggestion: { type: ['string', 'null'] },
-          confidence: { type: 'number' },
-        },
-        required: ['file', 'line', 'start_line', 'severity', 'category', 'title', 'body', 'suggestion', 'confidence'],
-      },
+      items: { type: 'string' },
+      description:
+        'Ids of the findings to remove: duplicates, speculative, or low-confidence. Empty when none.',
     },
   },
-  required: ['walkthrough', 'file_summaries', 'findings'],
+  required: ['walkthrough', 'file_summaries', 'drop'],
 };
 
 /** Apply the comment_prefix template to a finding. */

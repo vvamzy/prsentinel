@@ -130,6 +130,7 @@ class StubProvider implements LLMProvider {
     const isReduce = req.schema && 'walkthrough' in (req.schema as any).properties;
     if (isReduce) {
       // Pass through: reduce is exercised but does no useful work in stub mode.
+      // The reduce phase judges findings by id now, so the stub drops nothing.
       const userText = req.messages.find((m) => m.role === 'user')?.content ?? '';
       const findings = extractFindingsFromPrompt(userText);
       return {
@@ -137,7 +138,7 @@ class StubProvider implements LLMProvider {
         parsed: {
           walkthrough: `_Stub review._ Detected ${findings.length} candidate finding(s).`,
           file_summaries: [],
-          findings,
+          drop: [],
         },
         usage: emptyUsage(),
       };

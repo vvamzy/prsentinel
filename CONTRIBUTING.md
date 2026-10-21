@@ -67,7 +67,7 @@ src/
   review/
     prompts.ts        system prompt, per-phase prompts, JSON schemas
     map.ts            per-file analysis (parallel)
-    reduce.ts         walkthrough + dedupe
+    reduce.ts         walkthrough + the ids of the findings to drop
     filter.ts         deterministic noise reduction  ← the moat
     select.ts         pre-flight file selection (cost control)
     chunker.ts        splits oversized patches at hunk boundaries
@@ -175,15 +175,16 @@ validated any other way. Both are cheap enough to run on every change:
   does a real dry-run review with a bundled model and reports wall-clock time,
   comment count, and walkthrough length. This is the only way to see what a
   bundled 7B costs on a free runner. Use it after changing `src/llm/local.ts` or
-  the Dockerfile. It defaults to `max-files: 3`, because local inference is
+  the Dockerfile. It defaults to `max-files: 1`, because local inference is
   serialized and a full pull request would outlast the job; raise it — and the
-  timeout — only when you mean to measure the whole thing. It **fails** if the
-  pipeline logs that it dropped a file, so a green run means every selected file
-  was actually reviewed.
+  timeout — only when you mean to measure the whole thing. Dispatch it with
+  `model: local/qwen2.5-coder-1.5b-instruct` for a fast pass that only proves
+  the pipeline still runs. It **fails** if the pipeline logs that it dropped a
+  file, so a green run means every selected file was actually reviewed.
 
 A bundled model is served by a single `llama-server` slot (`--parallel 1`) on a
-runner with no GPU, so one call can take minutes. Two rules follow, and they are
-enforced in code rather than left to callers:
+runner with no GPU, so one call can take minutes. Three rules follow, and they
+are enforced in code rather than left to callers:
 
 - **Stream.** `OpenAICompatProvider` asks a server on loopback to stream, so the
   response headers arrive immediately. A non-streaming response sends nothing at
@@ -193,6 +194,12 @@ enforced in code rather than left to callers:
 - **Do not fan out.** `LLM.concurrency` returns 1 for anything on loopback, and
   `mapPhase` sizes its worker pool from it. A request queued behind the single
   slot receives no bytes while it waits, so it trips the same timeout.
+- **Budget the tokens.** A map call may spend 1024 tokens and a reduce call
+  2048. On four vCPUs a token costs roughly a quarter of a second, so an
+  unbounded budget is an unbounded wait — and a model that starts rambling
+  spends all of it and returns half an object. The prompts bound the answer as
+  well (at most five findings, a short summary, a walkthrough of a few
+  paragraphs), so the model is not invited to keep writing.
 
 Three things in the Dockerfile are load-bearing and will bite anyone who tidies
 them away:

@@ -320,9 +320,10 @@ gather ──▶ map ──▶ reduce ──▶ filter ──▶ one review
 2. **Map** — one independent LLM call per changed file, in parallel. Each
    returns findings plus a summary. Cheaper and higher quality than one giant
    prompt.
-3. **Reduce** — a single call synthesizes the walkthrough and de-duplicates
+3. **Reduce** — a single call synthesizes the walkthrough and judges the
    findings. It sees the *summaries*, not the raw diffs, which keeps the top
-   comment readable.
+   comment readable, and it answers with the ids of the findings to drop
+   rather than with the findings themselves — it judges, it does not rewrite.
 4. **Filter** — deterministic, LLM-free noise reduction: hunk containment,
    confidence thresholds, generated-file skipping, linter detection, dedupe,
    and caps.

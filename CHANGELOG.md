@@ -143,12 +143,23 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Action keeps the config in charge — there the config is the project's
   decision, and the input is one pull request's.
 - **Token budgets are bounded to what the answer needs.** A map call may spend
-  1024 tokens and a reduce call 2048, down from 4096 each. On a CPU-only runner
+  1024 tokens and a reduce call 1024, down from 4096 each. On a CPU-only runner
   a token costs about a quarter of a second, so the old ceiling was a
   seventeen-minute promise per call — and a model that started rambling spent
   all of it and returned unparseable JSON. One file of the first real local run
   burned thirteen and a half minutes of a 4096-token budget and produced nothing
   usable.
+- **The reduce phase judges findings by id instead of rewriting them.** It used
+  to answer with the whole finding set — title, body and replacement code for
+  every finding — and that echo was the largest thing it asked a model to
+  write. On a CPU-only runner it was two thirds of the review's wall clock (11
+  minutes of a 17-minute run), and a model asked to repeat a finding will
+  happily rewrite it into something else. It now answers with the walkthrough,
+  a summary per file, and the ids of the findings to remove. The findings
+  themselves are the map phase's, unchanged. A finding survives unless its id
+  is in the drop list, so a response that was cut off before the list — or that
+  named ids that do not exist — can no longer silently delete a real finding.
+  It did: a truncated reduce response took every finding of the review with it.
 - **The prompts bound the answer, not just the tokens.** Every map call is now
   told to report at most five findings and to keep the summary short, and the
   reduce call is told to keep the walkthrough to a few paragraphs. Before this
@@ -172,7 +183,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   token limit leaves half an object behind, and the file was dropped even
   though the call had already cost minutes. The truncated object is now closed
   and parsed, and the log says so, so a partial answer is visible rather than
-  silent.
+  silent. The reduce phase goes one step further: a truncated walkthrough is
+  cut back to its last complete sentence.
 - **The offline harness stopped working.** Its stub reviewer had a `complete`
   method and nothing else, so when the facade grew `concurrency()` — which
   `mapPhase` reads to size its worker pool — `npm run dev:review -- --stub`
