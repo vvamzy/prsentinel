@@ -4,6 +4,7 @@ import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import type { TokenUsage } from '../review/types.js';
 import {
   extractJson,
+  repairTruncatedJson,
   type CompleteRequest,
   type CompleteResult,
   type LLMProvider,
@@ -101,7 +102,17 @@ export class OpenAICompatProvider implements LLMProvider {
     const result: CompleteResult = { text, usage };
     if (req.schema) {
       const parsed = extractJson(text);
-      if (parsed !== null) result.parsed = parsed;
+      if (parsed !== null) {
+        result.parsed = parsed;
+      } else {
+        // The model ran out of tokens mid-object. Recover what it did finish
+        // rather than dropping the file the call already cost minutes for.
+        const repaired = repairTruncatedJson(text);
+        if (repaired !== null) {
+          result.parsed = repaired;
+          result.repaired = true;
+        }
+      }
     }
     return result;
   }

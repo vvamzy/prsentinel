@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { extractJson, mapWithConcurrency } from '../src/llm/provider.js';
+import { extractJson, mapWithConcurrency, repairTruncatedJson } from '../src/llm/provider.js';
 import {
   DEFAULT_CONCURRENCY,
   LLM,
@@ -38,6 +38,37 @@ describe('extractJson', () => {
   it('returns null for unparseable text', () => {
     expect(extractJson('no json here')).toBeNull();
     expect(extractJson('{"a":')).toBeNull();
+  });
+});
+
+describe('repairTruncatedJson', () => {
+  it('closes a string that was cut off', () => {
+    const out = repairTruncatedJson('{"summary": "looks good');
+    expect(out).toEqual({ summary: 'looks good' });
+  });
+
+  it('closes an object that was cut off', () => {
+    const out = repairTruncatedJson('{"summary": "ok", "findings": [{"line": 4, "title": "T"');
+    expect(out).toEqual({ summary: 'ok', findings: [{ line: 4, title: 'T' }] });
+  });
+
+  it('drops a dangling comma', () => {
+    const out = repairTruncatedJson('{"summary": "ok", "findings": [');
+    expect(out).toEqual({ summary: 'ok', findings: [] });
+  });
+
+  it('closes nested brackets innermost first', () => {
+    const out = repairTruncatedJson('{"a": {"b": [1, 2');
+    expect(out).toEqual({ a: { b: [1, 2] } });
+  });
+
+  it('refuses prose that merely contains a brace', () => {
+    expect(repairTruncatedJson('I think the code is { fine')).toBeNull();
+    expect(repairTruncatedJson('no json here')).toBeNull();
+  });
+
+  it('refuses an empty object', () => {
+    expect(repairTruncatedJson('{')).toBeNull();
   });
 });
 

@@ -56,6 +56,23 @@ describe('normalizeFindings', () => {
     const out = normalizeFindings('a.ts', [{ line: 5, title: 'T', body: 'B', suggestion: '  ' }]);
     expect(out[0]?.suggestion).toBeUndefined();
   });
+
+  // A model asked for "no suggestion" answers with the string "null" as often
+  // as with JSON null. Posting that would offer the reader a change that
+  // replaces their line with the word null.
+  it('treats a spelled-out absence as no suggestion', () => {
+    for (const word of ['null', 'NULL', ' none ', 'undefined', 'n/a', '-']) {
+      const out = normalizeFindings('a.ts', [{ line: 5, title: 'T', body: 'B', suggestion: word }]);
+      expect(out[0]?.suggestion).toBeUndefined();
+    }
+  });
+
+  it('keeps a suggestion that merely mentions null', () => {
+    const out = normalizeFindings('a.ts', [
+      { line: 5, title: 'T', body: 'B', suggestion: 'const value = null;' },
+    ]);
+    expect(out[0]?.suggestion).toBe('const value = null;');
+  });
 });
 
 describe('chunkPatch', () => {

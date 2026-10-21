@@ -1,6 +1,7 @@
 import type { LLMFacade } from '../llm/registry.js';
 import { REDUCE_SCHEMA, SYSTEM_PROMPT, reduceUserPrompt } from './prompts.js';
 import { normalizeFindings } from './map.js';
+import { log } from '../log.js';
 import {
   addUsage,
   emptyUsage,
@@ -64,7 +65,10 @@ export async function reducePhase(
       },
     ],
     schema: REDUCE_SCHEMA,
-    maxTokens: 4096,
+    // A walkthrough, a summary per file and the surviving findings. The same
+    // arithmetic as the map phase: on a CPU-only runner every token costs
+    // real seconds, so an unbounded cap is an unbounded wait.
+    maxTokens: 2048,
   });
 
   const parsed = res.parsed as
@@ -81,6 +85,10 @@ export async function reducePhase(
         .map((a) => ({ file: a.file, summary: a.summary })),
       usage: res.usage,
     };
+  }
+
+  if (res.repaired) {
+    log.warn('Reduce phase hit the token limit; recovered a truncated response');
   }
 
   const fileSummaries: FileSummary[] = (parsed.file_summaries ?? [])

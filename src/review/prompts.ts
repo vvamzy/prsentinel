@@ -35,7 +35,7 @@ Rules:
 - A suggestion must be a drop-in replacement for the exact lines it spans.
   It must compile and preserve behavior outside the stated problem.
 - A suggestion is code, never prose. If you cannot write the replacement code,
-  set the suggestion to null and put the advice in the body.
+  leave the suggestion empty and put the advice in the body.
 
 Severity guide:
 - critical: security vulnerability, data loss, crash, or logic error that
@@ -60,6 +60,10 @@ export function mapUserPrompt(params: {
   const parts: string[] = [];
   parts.push(`Review this pull request change to \`${params.file}\` (status: ${params.status}).`);
   if (params.languageHint) parts.push(`Primary language: ${params.languageHint}.`);
+  parts.push(
+    'Report at most five findings, and only the ones you are sure about. Keep the ' +
+      'summary to a few sentences. A short answer is worth more than a long one.',
+  );
   if (params.isLarge) {
     parts.push(
       'This is a large change. Focus on the highest-impact problems only; do not report more than the five most important findings.',
@@ -92,7 +96,8 @@ export function reduceUserPrompt(params: {
   parts.push(
     'Produce: (1) a walkthrough of what the PR does and anything a reviewer must check, ' +
       '(2) the final de-duplicated finding set. Drop findings that are duplicates, ' +
-      'speculative, or low-confidence. Re-rank by severity.',
+      'speculative, or low-confidence. Re-rank by severity. Keep the walkthrough ' +
+      'short — a few paragraphs, not a page.',
   );
   return parts.join('\n\n');
 }

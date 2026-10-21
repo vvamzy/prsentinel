@@ -89,13 +89,23 @@ export async function mapPhase(
           { role: 'user', content: prompt },
         ],
         schema: MAP_SCHEMA,
-        maxTokens: 4096,
+        // One file, a summary and at most five findings. A generous cap is not
+        // free: a CPU-only runner generates a few tokens per second, so 4096
+        // tokens is a seventeen-minute ceiling, and a model that starts
+        // rambling spends all of it and returns unparseable JSON.
+        maxTokens: 1024,
       });
 
       const parsed = res.parsed as { summary?: string; findings?: unknown[] } | undefined;
       if (!parsed) {
         log.warn(`map: no structured output for ${file.filename}; skipping`);
         return { ...emptyAnalysis(file.filename), usage: res.usage };
+      }
+
+      if (res.repaired) {
+        log.warn(
+          `map: ${file.filename} hit the token limit; recovered a truncated response`,
+        );
       }
 
       const findings = normalizeFindings(file.filename, parsed.findings ?? []);
@@ -150,10 +160,7 @@ export function normalizeFindings(file: string, raw: unknown[]): Finding[] {
     const body = String(r.body ?? '').trim();
     if (title === '' && body === '') continue;
 
-    const suggestion =
-      r.suggestion === null || r.suggestion === undefined
-        ? undefined
-        : String(r.suggestion);
+    const suggestion = readSuggestion(r.suggestion);
 
     const confidence = clamp01(Number(r.confidence));
 
@@ -177,6 +184,25 @@ function toPositiveInt(v: unknown): number | null {
   const n = typeof v === 'number' ? v : Number.parseInt(String(v ?? ''), 10);
   if (!Number.isFinite(n) || n < 1) return null;
   return Math.floor(n);
+}
+
+/**
+ * Read the model's replacement code, if it offered any.
+ *
+ * A model asked for "no suggestion" will answer in more ways than JSON null:
+ * the string "null", "none", "n/a", an empty string. All of them mean the same
+ * thing, and posting any of them as a ```suggestion block would offer the
+ * reader a change that replaces their line with the word "null".
+ */
+function readSuggestion(raw: unknown): string | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  const text = String(raw);
+  const trimmed = text.trim();
+  if (trimmed === '') return undefined;
+  if (['null', 'undefined', 'none', 'n/a', 'na', '-'].includes(trimmed.toLowerCase())) {
+    return undefined;
+  }
+  return text;
 }
 
 function clamp01(n: number): number {

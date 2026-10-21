@@ -17,7 +17,10 @@ on:
         description: Pull request number in this repository to review.
         required: true
       model:
-        description: Bundled model id.
+        description: >-
+          Bundled model id. The 7B is the headline model and takes minutes per
+          file on a CPU-only runner; local/qwen2.5-coder-1.5b-instruct is the
+          fast path when you only want to know the pipeline still works.
         required: false
         default: local/qwen2.5-coder-7b-instruct
       image-tag:
@@ -34,7 +37,7 @@ on:
           takes minutes per file, so keep this small; raise it (and the timeout)
           only when you mean to measure a whole pull request.
         required: false
-        default: '3'
+        default: '1'
 
 permissions:
   contents: read
@@ -45,7 +48,7 @@ jobs:
     name: ${{ inputs.model }} on PR #${{ inputs.pr-number }}
     runs-on: ubuntu-latest
     # A cold 4.4 GB download, then map-reduce inference with no GPU.
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 

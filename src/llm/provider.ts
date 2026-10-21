@@ -37,6 +37,11 @@ export interface CompleteResult {
   text: string;
   /** Parsed `schema` when one was requested and parsing succeeded. */
   parsed?: unknown;
+  /**
+   * True when the response was cut off mid-JSON and had to be closed by hand.
+   * The content is usable but incomplete, so callers should say so out loud.
+   */
+  repaired?: boolean;
   usage: TokenUsage;
 }
 
@@ -104,6 +109,63 @@ export function extractJson(text: string): unknown {
     }
   }
   return null;
+}
+
+/**
+ * Close a JSON object that was cut off mid-stream and parse what survived.
+ *
+ * A model that runs into the token limit, or a stream that ends early, leaves
+ * half an object behind: `{"summary": "ok", "findings": [{"line": 4, "tit`.
+ * Throwing that away throws away the file too, and on a CPU-only runner the
+ * call that produced it has already cost minutes. Closing the open string and
+ * brackets recovers the part that was complete.
+ *
+ * Returns null when nothing usable can be recovered, so the caller can fall
+ * back to "no structured output" and say so.
+ */
+export function repairTruncatedJson(text: string): unknown {
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+  const closed = closeOpenJson(text.slice(start));
+  if (closed === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(closed);
+  } catch {
+    return null;
+  }
+  // An empty object means we "repaired" nothing but prose that happened to
+  // contain a brace. That is not a recovery.
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  if (Object.keys(parsed as Record<string, unknown>).length === 0) return null;
+  return parsed;
+}
+
+/** Close the strings and brackets a truncated JSON document left open. */
+function closeOpenJson(body: string): string | null {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (const ch of body) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{' || ch === '[') stack.push(ch);
+    else if (ch === '}' || ch === ']') stack.pop();
+  }
+
+  let out = body;
+  if (inString) out += '"';
+  // A trailing ',' or ':' cannot end a value.
+  out = out.replace(/[,:]\s*$/, '');
+  // Innermost bracket first, so the result is balanced.
+  for (let i = stack.length - 1; i >= 0; i--) out += stack[i] === '{' ? '}' : ']';
+  return out;
 }
 
 /** Simple concurrency pool. Resolves in input order. */

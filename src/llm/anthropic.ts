@@ -1,6 +1,7 @@
 import type { TokenUsage } from '../review/types.js';
 import {
   extractJson,
+  repairTruncatedJson,
   type CompleteRequest,
   type CompleteResult,
   type LLMProvider,
@@ -95,7 +96,15 @@ export class AnthropicProvider implements LLMProvider {
     const result: CompleteResult = { text, usage };
     if (req.schema) {
       const parsed = extractJson(text);
-      if (parsed !== null) result.parsed = parsed;
+      if (parsed !== null) {
+        result.parsed = parsed;
+      } else {
+        const repaired = repairTruncatedJson(text);
+        if (repaired !== null) {
+          result.parsed = repaired;
+          result.repaired = true;
+        }
+      }
     }
     return result;
   }

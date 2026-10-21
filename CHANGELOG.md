@@ -142,8 +142,37 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   silently answered with a cloud one, so the run measured something else. The
   Action keeps the config in charge — there the config is the project's
   decision, and the input is one pull request's.
+- **Token budgets are bounded to what the answer needs.** A map call may spend
+  1024 tokens and a reduce call 2048, down from 4096 each. On a CPU-only runner
+  a token costs about a quarter of a second, so the old ceiling was a
+  seventeen-minute promise per call — and a model that started rambling spent
+  all of it and returned unparseable JSON. One file of the first real local run
+  burned thirteen and a half minutes of a 4096-token budget and produced nothing
+  usable.
+- **The prompts bound the answer, not just the tokens.** Every map call is now
+  told to report at most five findings and to keep the summary short, and the
+  reduce call is told to keep the walkthrough to a few paragraphs. Before this
+  only a "large change" got a limit, so an ordinary small diff had no bound at
+  all and the model could keep writing.
+- **The smoke test is quick by default**: `max-files` 3 → 1 and a 30-minute job
+  timeout instead of 60. A single-file review of a pull request is the check
+  worth repeating; measuring a whole pull request is a separate, deliberate
+  thing. Dispatch it with `model: local/qwen2.5-coder-1.5b-instruct` for a
+  fast pass that only proves the pipeline still runs.
 
 ### Fixed
+- **A review posted `null` as the suggested change.** Asked to leave a
+  suggestion out, the bundled 7B wrote the *string* `"null"`, and the parser
+  took any non-null value as code — so the review offered the reader a change
+  that replaced their line with the word `null`. `"null"`, `"none"`,
+  `"undefined"`, `"n/a"` and `"-"` now all mean "no suggestion". The prompt was
+  reworded too: it asks for an empty suggestion rather than for `null`, which
+  is a word a small model will happily copy.
+- **A response cut off mid-JSON threw the file away.** A model that hits the
+  token limit leaves half an object behind, and the file was dropped even
+  though the call had already cost minutes. The truncated object is now closed
+  and parsed, and the log says so, so a partial answer is visible rather than
+  silent.
 - **The offline harness stopped working.** Its stub reviewer had a `complete`
   method and nothing else, so when the facade grew `concurrency()` — which
   `mapPhase` reads to size its worker pool — `npm run dev:review -- --stub`
