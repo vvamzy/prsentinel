@@ -1,4 +1,4 @@
-import type { LLM } from '../llm/registry.js';
+import type { LLMFacade } from '../llm/registry.js';
 import { mapWithConcurrency } from '../llm/provider.js';
 import { contextLinesForEffort, isPathFiltered, type Config } from '../config.js';
 import { log } from '../log.js';
@@ -50,7 +50,7 @@ export interface GatheredPr {
 
 /** Map phase: run one independent LLM call per changed file, in parallel. */
 export async function mapPhase(
-  llm: LLM,
+  llm: LLMFacade,
   model: string,
   gathered: GatheredPr,
   config: Config,

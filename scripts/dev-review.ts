@@ -9,8 +9,14 @@
  * Usage:
  *   npx tsx scripts/dev-review.ts fixtures/sample-pr.json --stub
  *   LLM_API_KEY=sk-... npx tsx scripts/dev-review.ts fixtures/sample-pr.json
+ *   LLM_MODEL=local/qwen2.5-coder-7b-instruct npx tsx scripts/dev-review.ts \
+ *       fixtures/sample-pr.json
  *   GITHUB_TOKEN=ghp_... LLM_API_KEY=sk-... npx tsx scripts/dev-review.ts \
  *       --pr acme/widgets#42 --out fixtures/pr-42.json
+ *
+ * `LLM_MODEL` overrides `.prsentinel.yaml` — the environment wins here, because
+ * the harness is how you ask "how would model X review this?" and a config
+ * that pins a cloud model would make the question unanswerable.
  *
  * `--pr` fetches a real pull request (patch only — no checkout, so this is the
  * same read-as-data path the Action uses). `--out` saves it as a fixture so the
@@ -36,6 +42,8 @@ import { selectFiles } from '../src/review/select.js';
 import { buildReviewPayload } from '../src/github/review.js';
 import { emptyUsage, type FileAnalysis, type Finding } from '../src/review/types.js';
 import type { CompleteRequest, CompleteResult, LLMProvider } from '../src/llm/provider.js';
+import { isLocalModel, stopLocalServers } from '../src/llm/local.js';
+import type { LLMFacade } from '../src/llm/registry.js';
 
 interface Fixture {
   title: string;
@@ -151,10 +159,13 @@ class StubProvider implements LLMProvider {
 }
 
 /** Adapter so the pipeline can call the stub through the `LLM` facade shape. */
-const stubLLM = {
+const stubLLM: LLMFacade = {
   complete: (_model: string, req: Omit<CompleteRequest, 'model'>) =>
     new StubProvider().complete({ ...req, model: 'stub' }),
-} as any;
+  // The stub answers instantly, so it can take as many requests at once as the
+  // pipeline wants to give it.
+  concurrency: () => 6,
+};
 
 function heuristicFindings(file: string, annotated: string): Finding[] {
   const out: Finding[] = [];
@@ -261,14 +272,35 @@ async function main(): Promise<void> {
   let llm = stubLLM;
   let model = 'stub';
   if (!useStub) {
-    const key = process.env.LLM_API_KEY ?? process.env.OPENAI_API_KEY;
-    if (!key) {
-      console.error('No LLM_API_KEY set. Re-run with --stub for an offline run.');
-      process.exit(2);
+    // The environment wins over the repository's own config. The harness is
+    // how you ask "how would model X review this?", and a config that pins a
+    // cloud model — as this repository's does — would otherwise make the
+    // question unanswerable.
+    model = process.env.LLM_MODEL || config.models.review || 'openai/gpt-4o-mini';
+
+    if (isLocalModel(model)) {
+      // A bundled model needs no key, but it does need llama-server on PATH
+      // (or $PRSENTINEL_LLAMA_SERVER) and somewhere to keep the weights.
+      const { ensureLocalServer } = await import('../src/llm/local.js');
+      const server = await ensureLocalServer(model, {
+        cacheDir: resolve(process.cwd(), '.prsentinel/models'),
+      });
+      const { LLM } = await import('../src/llm/registry.js');
+      llm = new LLM({ apiKey: 'local', baseUrl: server.baseUrl });
+      console.log(`Local model: ${server.baseUrl} (weights in ${resolve(process.cwd(), '.prsentinel/models')})`);
+    } else {
+      const key = process.env.LLM_API_KEY ?? process.env.OPENAI_API_KEY;
+      if (!key) {
+        console.error('No LLM_API_KEY set. Re-run with --stub for an offline run.');
+        process.exitCode = 2;
+        return;
+      }
+      const { LLM } = await import('../src/llm/registry.js');
+      llm = new LLM({
+        apiKey: key,
+        ...(process.env.LLM_BASE_URL ? { baseUrl: process.env.LLM_BASE_URL } : {}),
+      });
     }
-    const { LLM } = await import('../src/llm/registry.js');
-    llm = new LLM({ apiKey: key, ...(process.env.LLM_BASE_URL ? { baseUrl: process.env.LLM_BASE_URL } : {}) });
-    model = config.models.review || process.env.LLM_MODEL || 'openai/gpt-4o-mini';
   }
 
   console.log(`Source:  ${prRef ?? fixturePath}`);
@@ -301,7 +333,8 @@ async function main(): Promise<void> {
     `out-of-hunk=${filtered.stats.droppedOutOfHunk} ` +
     `filtered-path=${filtered.stats.droppedFilteredPath} ` +
     `duplicate=${filtered.stats.droppedDuplicate} ` +
-    `cap=${filtered.stats.droppedCap} style=${filtered.stats.suppressedStyle}`);
+    `cap=${filtered.stats.droppedCap} style=${filtered.stats.suppressedStyle} ` +
+    `prose-suggestion=${filtered.stats.strippedProseSuggestion}`);
 
   const payload = buildReviewPayload({ ...reduced, findings: filtered.findings }, config, {
     headSha: fixture.headSha,
@@ -325,11 +358,16 @@ async function main(): Promise<void> {
     console.log(`\n✓ All ${payload.comments.length} comment(s) anchored to real diff lines.`);
   } else {
     console.error(`\n✖ ${bad} comment(s) are not anchored to diff lines.`);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main()
+  .catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    // A bundled model runs as a child process holding gigabytes of weights.
+    await stopLocalServers();
+  });

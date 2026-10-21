@@ -1,4 +1,4 @@
-import type { LLM } from '../llm/registry.js';
+import type { LLMFacade } from '../llm/registry.js';
 import { REDUCE_SCHEMA, SYSTEM_PROMPT, reduceUserPrompt } from './prompts.js';
 import { normalizeFindings } from './map.js';
 import {
@@ -18,7 +18,7 @@ import {
  * 50-file PR.
  */
 export async function reducePhase(
-  llm: LLM,
+  llm: LLMFacade,
   model: string,
   params: {
     prTitle: string;

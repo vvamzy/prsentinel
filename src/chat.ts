@@ -4,7 +4,7 @@ import * as github from '@actions/github';
 import type { Config } from './config.js';
 import type { GitHubClient } from './github/client.js';
 import { annotatePatch, parsePatch } from './github/diff.js';
-import type { LLM } from './llm/registry.js';
+import type { LLMFacade } from './llm/registry.js';
 import { log } from './log.js';
 import { CHAT_SYSTEM, chatUserPrompt } from './review/prompts.js';
 
@@ -22,7 +22,7 @@ import { CHAT_SYSTEM, chatUserPrompt } from './review/prompts.js';
 export interface ChatOptions {
   client: GitHubClient;
   config: Config;
-  llm: LLM;
+  llm: LLMFacade;
   model: string;
   prNumber: number;
   botLogins: string[];

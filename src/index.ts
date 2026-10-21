@@ -9,7 +9,7 @@ import { log } from './log.js';
 import { GitHubClient, resolveRepoContext } from './github/client.js';
 import { resolveAuth, hasAnyCredentials, type AuthInputs } from './github/auth.js';
 import { serializePayload } from './github/review.js';
-import { LLM } from './llm/registry.js';
+import { LLM, type LLMFacade } from './llm/registry.js';
 import {
   isLocalModel,
   ensureLocalServer,
@@ -107,7 +107,7 @@ async function runAutoReview(
   env: RunEnv,
   client: GitHubClient,
   config: Config,
-  llm: LLM,
+  llm: LLMFacade,
 ): Promise<void> {
   const outcome = await runReview({
     client,
@@ -133,7 +133,7 @@ async function runCommandFlow(
   env: RunEnv,
   client: GitHubClient,
   config: Config,
-  llm: LLM,
+  llm: LLMFacade,
   botLogins: string[],
 ): Promise<void> {
   if (!config.commands.enabled) {

@@ -1,7 +1,7 @@
 import type { Config } from '../config.js';
 import type { GitHubClient, IssueComment } from '../github/client.js';
 import { annotatePatch, parsePatch } from '../github/diff.js';
-import type { LLM } from '../llm/registry.js';
+import type { LLMFacade } from '../llm/registry.js';
 import { contextLinesForEffort } from '../config.js';
 import { selectFiles } from '../review/select.js';
 import type { ChangedFile } from '../review/map.js';
@@ -18,7 +18,7 @@ import type { KnownCommand } from '../state.js';
 export interface CommandContext {
   client: GitHubClient;
   config: Config;
-  llm: LLM;
+  llm: LLMFacade;
   /** Model id for conversational work (falls back to the review model). */
   model: string;
   prNumber: number;

@@ -134,8 +134,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   whitespace it did not have. The prompt now says to read the changed lines back
   before reporting, to leave whitespace to the linter, and to answer a suggestion
   with replacement code or nothing.
+- **The LLM facade is an interface now.** The pipeline takes `LLMFacade` rather
+  than the `LLM` class, so a stub written against it is checked by the compiler
+  instead of quietly losing whatever the facade gains next.
+- **`LLM_MODEL` overrides `.prsentinel.yaml` in the development harness**, where
+  it did not: the environment asked for a model and the repository's own config
+  silently answered with a cloud one, so the run measured something else. The
+  Action keeps the config in charge — there the config is the project's
+  decision, and the input is one pull request's.
 
 ### Fixed
+- **The offline harness stopped working.** Its stub reviewer had a `complete`
+  method and nothing else, so when the facade grew `concurrency()` — which
+  `mapPhase` reads to size its worker pool — `npm run dev:review -- --stub`
+  died with `TypeError: llm.concurrency is not a function`. The harness also
+  stops the bundled server it starts, instead of leaving it holding gigabytes
+  of weights.
 - **Bundled local models skipped most of the files and reported success.** A
   single map call on a 7B model takes longer than five minutes on a free 4 vCPU
   runner, and a non-streaming completion sends no bytes at all until the whole

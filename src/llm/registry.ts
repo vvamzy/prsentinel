@@ -83,10 +83,25 @@ export function resolveProvider(
 export const DEFAULT_CONCURRENCY = 6;
 
 /**
+ * What the review pipeline needs from an LLM.
+ *
+ * The pipeline talks to this, not to a concrete provider, so a test or an
+ * offline harness can stand in for a real model. It is an interface rather
+ * than the `LLM` class on purpose: a stub that implements the shape is checked
+ * by the compiler, where a hand-rolled object with the right methods today
+ * silently loses whatever the facade gains tomorrow.
+ */
+export interface LLMFacade {
+  complete(model: string, req: Omit<CompleteRequest, 'model'>): Promise<CompleteResult>;
+  /** How many requests this model's server can usefully take at once. */
+  concurrency(model: string): number;
+}
+
+/**
  * A thin facade the review pipeline talks to. It owns routing and retries
  * so callers never touch providers directly.
  */
-export class LLM {
+export class LLM implements LLMFacade {
   constructor(private readonly creds: ProviderCredentials) {}
 
   async complete(model: string, req: Omit<CompleteRequest, 'model'>): Promise<CompleteResult> {

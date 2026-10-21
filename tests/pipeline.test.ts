@@ -5,6 +5,7 @@ import { filterFindings, buildPatchIndex } from '../src/review/filter.js';
 import { buildReviewPayload } from '../src/github/review.js';
 import { parseConfig } from '../src/config.js';
 import type { CompleteRequest, CompleteResult, LLMProvider } from '../src/llm/provider.js';
+import type { LLMFacade } from '../src/llm/registry.js';
 
 /**
  * End-to-end pipeline test with a stub LLM.
@@ -99,13 +100,13 @@ class StubProvider implements LLMProvider {
 }
 
 /** Minimal LLM facade matching the shape the pipeline expects. */
-const stubLLM = {
+const stubLLM: LLMFacade = {
   async complete(model: string, req: any) {
     return new StubProvider().complete({ ...req, model });
   },
   // A hosted-model fan-out; `mapPhase` reads this to size its worker pool.
   concurrency: () => 6,
-} as any;
+};
 
 function makeGathered(): GatheredPr {
   const file: ChangedFile = {

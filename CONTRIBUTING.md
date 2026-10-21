@@ -134,10 +134,20 @@ npm run dev:review -- fixtures/sample-pr.json --stub
 # Against a real model on a saved fixture:
 LLM_API_KEY=sk-... npm run dev:review -- fixtures/sample-pr.json
 
+# Against a bundled model, with no key at all (needs llama-server on PATH):
+LLM_MODEL=local/qwen2.5-coder-7b-instruct \
+  npm run dev:review -- fixtures/sample-pr.json
+
 # Against a real pull request, saving it as a fixture for next time:
 GITHUB_TOKEN=ghp_... LLM_API_KEY=sk-... \
   npm run dev:pr -- acme/widgets#42 --out fixtures/pr-42.json
 ```
+
+`LLM_MODEL` wins over `.prsentinel.yaml` here, which is the opposite of the
+Action: the harness is how you ask "how would model X review this?", and this
+repository's own config pins a cloud model, which would make the question
+unanswerable. The Action keeps the config in charge, because there the config
+is the project's decision and the input is one pull request's.
 
 `--pr` reads the diff through the API — the same read-as-data path the Action
 uses, with no checkout — so it is safe to point at any public PR.

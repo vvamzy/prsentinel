@@ -3,7 +3,7 @@ import type { GitHubClient } from './github/client.js';
 import { gatherContexts } from './github/context.js';
 import { buildReviewPayload } from './github/review.js';
 import { parsePatch } from './github/diff.js';
-import type { LLM } from './llm/registry.js';
+import type { LLMFacade } from './llm/registry.js';
 import { log } from './log.js';
 import { mapPhase, type ChangedFile, type FileContext } from './review/map.js';
 import { reducePhase } from './review/reduce.js';
@@ -26,7 +26,7 @@ import { emptyUsage, type ReviewPayload, type ReviewPlan } from './review/types.
 export interface ReviewOptions {
   client: GitHubClient;
   config: Config;
-  llm: LLM;
+  llm: LLMFacade;
   model: string;
   prNumber: number;
   /**
