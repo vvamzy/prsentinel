@@ -160,6 +160,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   is in the drop list, so a response that was cut off before the list — or that
   named ids that do not exist — can no longer silently delete a real finding.
   It did: a truncated reduce response took every finding of the review with it.
+- **Measured, on a free 4 vCPU runner with the bundled 7B**: a one-file review
+  went from 17 minutes of wall clock to 3–6, and a three-file review from 13
+  minutes to 9. The reduce phase is now about a minute instead of eleven; the
+  map phase is one to three minutes per file, depending on whether the model
+  keeps its answer short or has to be cut off at the token limit. The 1.5B
+  reviews three files in 5 minutes.
 - **The prompts bound the answer, not just the tokens.** Every map call is now
   told to report at most five findings and to keep the summary short, and the
   reduce call is told to keep the walkthrough to a few paragraphs. Before this

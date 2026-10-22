@@ -158,18 +158,24 @@ Nothing is sent to a third party, and `llm-api-key` is not required.
 
 > **Read this before choosing it.** A free GitHub-hosted runner is 4 vCPU with
 > no GPU, so a 7B model generates a few tokens per second and asks for minutes
-> per file. Measured with the bundled smoke test: 3 files analysed and
-> summarised in **12 minutes** on 4 vCPU, more than half of it the reduce step.
+> per file. Measured with the bundled smoke test on 4 vCPU: one file reviewed
+> and summarised in **3–6 minutes** wall clock, three files in **10 minutes**.
+> Roughly 1–3 minutes of that is the map phase per file — a 7B that keeps
+> rambling is cut off at 1024 tokens — and about a minute is the reduce phase.
 > Local reviews run **one file at a time** — that is all a single-slot server
-> can do — so budget roughly a minute per file plus the summary, and expect a
-> 20-file pull request to take most of an hour.
+> can do — so budget a couple of minutes per file, and expect a 20-file pull
+> request to take most of an hour. The 1.5B is the fast path: it reviews the
+> same pull request in a fraction of the time, with a fraction of the sense.
 >
 > On quality it is plainly below `gpt-4o-mini`, which costs about $0.15 per
-> million input tokens. In that same run **five of the six findings were
-> wrong**: the model reported that a changelog did not state the default model
-> size on the very line that stated it, and that a file had trailing whitespace
-> it did not have. Use a local model when *privacy or zero cost* matters more
-> than speed and precision — not as a default.
+> million input tokens. In the three-file run above **all three findings were
+> wrong**, and all three were the same mistake: the model reported that a
+> changelog did not state the default model size on the very line that stated
+> it, and the line it proposed as a fix repeated that sentence back. An earlier
+> run had five of six wrong. The 1.5B is weaker still: it found the same
+> three problems, all below the confidence floor, so it produced a walkthrough
+> and no comments at all. Use a local model when *privacy or zero cost* matters
+> more than speed and precision — not as a default.
 
 Weights are cached and checksummed; a killed job never leaves a half-download
 that a later run trusts. To keep them between runs, point `local-model-cache` at
@@ -391,8 +397,10 @@ Tags are explicit rather than `latest`-based, because the default branch is
 To measure what a bundled model actually costs on a free runner, dispatch the
 manual **Local model smoke test** workflow: it pulls this image, reviews a real
 pull request with a chosen `local/…` model, and reports wall-clock time and
-findings. It fails if any file is dropped, so a green run means the review really
-happened.
+findings. It reviews one file by default, so a run is a few minutes rather
+than half an hour; raise `max-files` when you mean to measure a whole pull
+request. It fails if any file is dropped, so a green run means the review
+really happened.
 
 The image is additive: the action still builds from its own `Dockerfile`, which
 is what keeps `.github/workflows/self-test.yml` honest, since `uses: ./`
