@@ -473,8 +473,9 @@ Two checks cover things the unit tests cannot. Both are documented in
   real `/v1/chat/completions` route. Run it locally against a local image with
   `docker build -t prsentinel-action . && docker run --rm -i --entrypoint /bin/sh prsentinel-action < scripts/verify-local-model.sh`.
 - The **Local model smoke test** workflow (manual dispatch) runs a real dry-run
-  review with a bundled model and reports wall-clock time and payload size. This
-  is the only measurement of what a bundled 7B actually costs on a free runner.
+  review with a bundled model inside the built image and reports wall-clock time
+  and payload size. It is a check on the image; the eval below is what says
+  whether the model is any good.
 
 Whether the review is any *good* is a separate question, and `npm run eval`
 answers it: it runs the labelled diffs in [`evals/`](evals/) through the real
