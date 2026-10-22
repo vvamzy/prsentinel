@@ -1,0 +1,56 @@
+{
+  "name": "path-traversal-upload",
+  "source": "hand-written",
+  "notes": "A new upload helper joins a client-supplied filename onto the upload root with no containment check, so `../../..` writes anywhere the process can reach. The docstring says the value is untrusted, which removes any doubt about the intent.",
+  "pr": {
+    "title": "Add an upload store for attachment files",
+    "body": "Attachments land next to the database so the mailer can pick them up by name.",
+    "number": 103,
+    "headSha": "7777777777777777777777777777777777777777",
+    "baseSha": "8888888888888888888888888888888888888888",
+    "files": [
+      {
+        "filename": "src/uploads/store.ts",
+        "status": "added",
+        "changes": 15,
+        "patch": "@@ -0,0 +1,15 @@\n+import { mkdir, writeFile } from 'node:fs/promises';\n+import path from 'node:path';\n+\n+const UPLOAD_ROOT = process.env.UPLOAD_ROOT ?? '/var/lib/uploads';\n+\n+/**\n+ * Persist one upload. `name` is the value the client sent in the multipart\n+ * filename field, so it is untrusted input.\n+ */\n+export async function storeUpload(name: string, bytes: Buffer): Promise<string> {\n+  const target = path.join(UPLOAD_ROOT, name);\n+  await mkdir(path.dirname(target), { recursive: true });\n+  await writeFile(target, bytes);\n+  return target;\n+}"
+      }
+    ]
+  },
+  "expect": [
+    {
+      "id": "filename-traversal",
+      "path": "src/uploads/store.ts",
+      "line": 11,
+      "tolerance": 3,
+      "match_any": [
+        "path traversal",
+        "traversal",
+        "escape",
+        "outside the upload",
+        "outside upload",
+        "../",
+        "dot-dot",
+        "parent director",
+        "arbitrary file",
+        "sanitiz",
+        "untrusted"
+      ],
+      "why": "A name like `../../../etc/cron.d/x` resolves outside UPLOAD_ROOT. The fix is a containment check (resolve, then verify the prefix) or path.basename."
+    }
+  ],
+  "allow": [
+    {
+      "path": "src/uploads/store.ts",
+      "match_any": [
+        "missing test",
+        "no test",
+        "not tested",
+        "untested",
+        "add a test",
+        "tests for"
+      ],
+      "why": "The fixture is a snippet; the repository has its tests elsewhere."
+    }
+  ]
+}

@@ -27,6 +27,11 @@ it unless you say otherwise. `main` is the release branch and only moves when
 `main` is protected: merges require a pull request and a passing CI run, and
 direct pushes are rejected. So the flow is always `dev` → PR → `main`.
 
+A release is that PR, a tag on `main`, and a flip of every install example to
+the new ref — all three, or the docs end up running different code from the
+workflow they describe. The full checklist is
+[docs/RELEASING.md](docs/RELEASING.md).
+
 ```bash
 git switch dev
 # ... make your changes ...

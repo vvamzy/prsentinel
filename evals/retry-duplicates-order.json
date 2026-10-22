@@ -1,0 +1,64 @@
+{
+  "name": "retry-duplicates-order",
+  "source": "hand-written",
+  "notes": "A timeout does not mean the request was not processed: the gateway may have created the order and lost the reply. Retrying a POST with no idempotency key can create a second order (and charge twice). The response id is server-assigned, so the client has nothing to make the retry safe with.",
+  "pr": {
+    "title": "Retry order submission on gateway timeouts",
+    "body": "The payments gateway has been timing out under load and checkout gives up on the first failure.",
+    "number": 104,
+    "headSha": "9999999999999999999999999999999999999999",
+    "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "files": [
+      {
+        "filename": "src/orders/submit.ts",
+        "status": "added",
+        "changes": 22,
+        "patch": "@@ -0,0 +1,22 @@\n+import { post, sleep } from './http.js';\n+\n+export interface Order {\n+  id: string;\n+  lines: Array<{ sku: string; qty: number }>;\n+}\n+\n+/**\n+ * Send an order to the payments gateway. The gateway assigns the order id and\n+ * has been timing out under load, so retry a few times with backoff.\n+ */\n+export async function submitOrder(order: Order): Promise<{ id: string }> {\n+  for (let attempt = 1; attempt <= 3; attempt++) {\n+    try {\n+      return await post('/orders', order);\n+    } catch (err) {\n+      if (attempt === 3) throw err;\n+      await sleep(2 ** attempt * 100);\n+    }\n+  }\n+  throw new Error('unreachable');\n+}"
+      }
+    ]
+  },
+  "expect": [
+    {
+      "id": "non-idempotent-retry",
+      "path": "src/orders/submit.ts",
+      "line": 15,
+      "tolerance": 4,
+      "match_any": [
+        "idempoten",
+        "duplicate order",
+        "duplicate",
+        "double-submit",
+        "double submit",
+        "twice",
+        "retries a post",
+        "retrying a post",
+        "retry a post",
+        "charge"
+      ],
+      "why": "A POST that creates a resource cannot be retried blindly; it needs a client-supplied idempotency key that the gateway deduplicates on."
+    }
+  ],
+  "allow": [
+    {
+      "path": "src/orders/submit.ts",
+      "match_any": [
+        "missing test",
+        "no test",
+        "not tested",
+        "untested",
+        "add a test",
+        "tests for"
+      ],
+      "why": "The fixture is a snippet; the repository has its tests elsewhere."
+    },
+    {
+      "path": "src/orders/submit.ts",
+      "match_any": [
+        "magic number",
+        "2 ** attempt",
+        "backoff constant"
+      ],
+      "why": "The backoff constant is visible in the diff and not the point of the review."
+    }
+  ]
+}
