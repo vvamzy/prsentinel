@@ -487,12 +487,33 @@ LLM_API_KEY=sk-... npm run eval          # the cloud model you ship
 LLM_MODEL=local/qwen2.5-coder-7b-instruct npm run eval
 ```
 
-The suite is small and deliberately includes *clean* diffs, where the right
-answer is silence — inventing a problem is the failure mode that actually annoys
-people. No cloud-model score has been published yet; the numbers above are from
-the smoke test. Run it with your key to get your model's. The **Quality eval**
-workflow (manual dispatch) does the same thing on a runner, with thresholds to
-turn it into a gate.
+The suite is deliberately weighted towards *clean* diffs, where the right answer
+is silence — inventing a problem is the failure mode that actually annoys
+people. Measured on a free 4 vCPU runner over the six cases in
+[`evals/`](evals/):
+
+| Model | Comments | Precision | Recall | On clean diffs | Wall clock |
+|---|---:|---:|---:|---:|---:|
+| `local/qwen2.5-coder-7b-instruct` | 8 | 13% | 25% | 2 | 14 min |
+| `local/qwen2.5-coder-1.5b-instruct` | 2 | 0% | 0% | 0 | 6 min |
+
+That is the argument for keeping a cloud model the default and `local/…`
+opt-in. The 7B posts eight comments on six diffs and seven are wrong: it asks
+for doc comments on a refactor, calls an ordinary `return` an error, says
+"Potential race condition" on the webhook dispatcher without noticing the
+dispatch is never awaited. The one it gets right is the filename traversal,
+anchored exactly — and it says nothing at all about the off-by-one, the plainest
+bug in the suite. The 1.5B produced nine findings across the six cases and
+posted two, both wrong — the rest fell below the confidence floor or duplicated
+another finding, which is why silence and a working filter look identical from
+the outside.
+
+Neither number is a harness defect, and the difference between "the model said
+nothing" and "the filter removed everything it said" is printed per case in the
+`Filtered out` block. No cloud-model score has been published yet — that number
+is what gates `v1`, and it needs a key. Run `npm run eval` with yours, or
+dispatch the **Quality eval** workflow; `--min-precision` and `--min-recall` turn
+the report into a gate.
 
 The test suite includes an end-to-end pipeline test with a stub LLM, so you can
 iterate on prompts and filtering without spending a cent.

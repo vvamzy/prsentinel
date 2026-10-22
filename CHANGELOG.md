@@ -51,7 +51,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   **Quality eval** workflow uses. `npm run eval:stub` runs the whole thing with
   no model and no network, so the harness is covered by ordinary CI. Six labelled
   cases: two clean diffs, an off-by-one, an unawaited dispatch, a filename
-  traversal, and a non-idempotent retry.
+  traversal, and a non-idempotent retry. The bundled models have now been
+  measured on it: the 7B posts eight comments on six diffs and seven are wrong,
+  the 1.5B posts two and both are wrong. Neither is a review worth having, which
+  is the point of saying so before anyone enables one.
 - **`docs/RELEASING.md`**: what a release actually is here — promote `dev` to
   `main` with a merge commit, tag, flip every install example to the new ref,
   back-merge. It exists because a tag on its own leaves the README running one

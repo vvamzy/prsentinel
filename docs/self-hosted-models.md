@@ -147,4 +147,6 @@ LLM_MODEL=ollama/qwen2.5-coder:14b LLM_BASE_URL=http://gpu-box:11434/v1 \
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md#measuring-quality) for adding cases
 from your own repository — those are the ones that predict what your team will
-actually see.
+actually see. The bundled models score badly on the six cases that ship with
+the repo ([numbers in the README](../README.md#development)); a 14B on a real
+GPU should beat them, but "should" is why the harness exists.
