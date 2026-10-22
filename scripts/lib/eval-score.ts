@@ -264,6 +264,10 @@ export interface SuiteScore {
   allowed: number;
   unanchored: number;
   proseSuggestions: number;
+  /** Cases where the correct review is no review at all. */
+  cleanCases: number;
+  /** Comments posted on those cases. Each one is a false positive by definition. */
+  cleanComments: number;
   durationMs: number;
   inputTokens: number;
   outputTokens: number;
@@ -284,6 +288,8 @@ export function sumScores(cases: FixtureScore[]): SuiteScore {
     allowed: sum((s) => s.allowed),
     unanchored: sum((s) => s.unanchored),
     proseSuggestions: sum((s) => s.proseSuggestions),
+    cleanCases: cases.filter((s) => s.expected === 0).length,
+    cleanComments: cases.filter((s) => s.expected === 0).reduce((n, s) => n + s.findings, 0),
     durationMs: sum((s) => s.durationMs),
     inputTokens: sum((s) => s.inputTokens),
     outputTokens: sum((s) => s.outputTokens),

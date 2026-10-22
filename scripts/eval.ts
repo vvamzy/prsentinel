@@ -239,6 +239,13 @@ function printText(suite: SuiteScore): void {
     `\n${suite.cases.length} case(s) · ${short(suite.inputTokens)} in / ${short(suite.outputTokens)} out tokens · ` +
       `${seconds(suite.durationMs)} wall clock`,
   );
+  // The metric a reader actually feels. Precision can look respectable while a
+  // comment still lands on a diff that needed no comment, which is the thing
+  // that makes a reviewer tiresome.
+  console.log(
+    `  ${suite.cleanComments} comment(s) on ${suite.cleanCases} clean case(s)` +
+      (suite.cleanComments === 0 ? ' — silence, as intended' : ''),
+  );
   if (suite.allowed > 0) console.log(`  ${suite.allowed} comment(s) matched an explicit allow rule`);
 
   // Why raw findings did not become comments. "0 posted" on its own cannot
@@ -294,7 +301,8 @@ function markdownTable(suite: SuiteScore, model: string): string {
       `**${suite.falsePositives}** | **${rate(precision(suite))}** | **${rate(recall(suite))}** |`,
     '',
     `<sub>${seconds(suite.durationMs)} wall clock · ${short(suite.inputTokens)} in / ` +
-      `${short(suite.outputTokens)} out tokens</sub>`,
+      `${short(suite.outputTokens)} out tokens · ` +
+      `**${suite.cleanComments} comment(s) on ${suite.cleanCases} clean case(s)**</sub>`,
   ];
   return lines.join('\n');
 }

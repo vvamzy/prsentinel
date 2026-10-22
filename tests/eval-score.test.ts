@@ -233,4 +233,21 @@ describe('sumScores', () => {
     expect(suite.inputTokens).toBe(15);
     expect(suite.outputTokens).toBe(5);
   });
+
+  it('counts comments on clean cases apart from the rest', () => {
+    // A comment on a diff that needed none is the annoyance people actually
+    // feel, so it gets its own number instead of hiding inside precision.
+    const clean = scoreFindings({
+      expectations: [],
+      findings: [finding({ title: 'Looks wrong' }), finding({ title: 'Also wrong', line: 3 })],
+    });
+    const cleanSilent = scoreFindings({ expectations: [], findings: [] });
+    const buggy = scoreFindings({ expectations: [expectation()], findings: [finding()] });
+
+    const suite = sumScores([clean, cleanSilent, buggy]);
+    expect(suite.cleanCases).toBe(2);
+    expect(suite.cleanComments).toBe(2);
+    // Precision counts every false positive; this counts only the clean ones.
+    expect(suite.falsePositives).toBe(2);
+  });
 });
