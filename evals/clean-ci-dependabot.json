@@ -1,0 +1,33 @@
+{
+  "name": "clean-ci-dependabot",
+  "source": "https://github.com/vvamzy/prsentinel/pull/3",
+  "notes": "A real merged PR: a dependabot config plus two engine bumps that agree with each other. Targeted at dev, which is this repo's integration branch. Nothing here is wrong.",
+  "pr": {
+    "title": "Add dependabot and align the declared Node version",
+    "body": "Actions were three majors behind and nobody noticed. Dependabot keeps them current; `engines.node` now matches what CI and the Dockerfile actually run.",
+    "number": 3,
+    "headSha": "3333333333333333333333333333333333333333",
+    "baseSha": "4444444444444444444444444444444444444444",
+    "files": [
+      {
+        "filename": ".github/dependabot.yml",
+        "status": "added",
+        "changes": 21,
+        "patch": "@@ -0,0 +1,21 @@\n+version: 2\n+\n+updates:\n+  # The actions pinned in .github/workflows sat three majors behind (v4 while v7\n+  # was current) and nobody noticed until \"Node.js 20 is deprecated\" appeared on\n+  # every run. This keeps that from happening again.\n+  - package-ecosystem: github-actions\n+    directory: /\n+    # Pull requests land on the integration branch, like every other change.\n+    target-branch: dev\n+    schedule:\n+      interval: weekly\n+      day: monday\n+    commit-message:\n+      prefix: ci\n+    # One PR for all action bumps rather than one per action. CI validates the\n+    # bump, so a major version is safe to review like any other change.\n+    groups:\n+      github-actions:\n+        patterns:\n+          - '*'"
+      },
+      {
+        "filename": "package.json",
+        "status": "modified",
+        "changes": 2,
+        "patch": "@@ -24,7 +24,7 @@\n     \"lint\": \"tsc --noEmit\"\n   },\n   \"engines\": {\n-    \"node\": \">=20\"\n+    \"node\": \">=22\"\n   },\n   \"dependencies\": {\n     \"@actions/core\": \"^1.11.1\","
+      },
+      {
+        "filename": "package-lock.json",
+        "status": "modified",
+        "changes": 2,
+        "patch": "@@ -25,7 +25,7 @@\n         \"vitest\": \"^2.1.8\"\n       },\n       \"engines\": {\n-        \"node\": \">=20\"\n+        \"node\": \">=22\"\n       }\n     },"
+      }
+    ]
+  },
+  "expect": []
+}

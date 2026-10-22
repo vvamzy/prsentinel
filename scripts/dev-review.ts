@@ -2,9 +2,9 @@
 /**
  * Offline review harness for contributors.
  *
- * Runs the full pipeline (map → reduce → filter → payload) against a saved PR
- * fixture, or against a live pull request, with no GitHub API calls unless you
- * ask for one.
+ * Runs the full pipeline (select → map → reduce → filter → payload) against a
+ * saved PR fixture, or against a live pull request, with no GitHub API calls
+ * unless you ask for one.
  *
  * Usage:
  *   npx tsx scripts/dev-review.ts fixtures/sample-pr.json --stub
@@ -20,44 +20,25 @@
  *
  * `--pr` fetches a real pull request (patch only — no checkout, so this is the
  * same read-as-data path the Action uses). `--out` saves it as a fixture so the
- * same PR can be re-run for free afterwards.
+ * same PR can be re-run for free afterwards — which is also the first step
+ * towards adding it to `evals/`.
  *
  * `--stub` uses a deterministic heuristic reviewer that flags TODO/FIXME and
  * stray console.log calls. That is enough to exercise filtering, line mapping,
  * and payload rendering — the parts most likely to break — for free.
  *
  * What this harness cannot tell you is whether the *suggestions are good*.
- * Only a real model on real PRs can answer that.
+ * `scripts/eval.ts` is the one that scores that.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { loadConfig, parseConfig } from '../src/config.js';
-import { parsePrRef } from '../src/github/pr-ref.js';
-import { mapPhase, type ChangedFile, type GatheredPr } from '../src/review/map.js';
-import { reducePhase } from '../src/review/reduce.js';
-import { buildPatchIndex, filterFindings } from '../src/review/filter.js';
-import { selectFiles } from '../src/review/select.js';
-import { buildReviewPayload } from '../src/github/review.js';
-import { emptyUsage, type FileAnalysis, type Finding } from '../src/review/types.js';
-import type { CompleteRequest, CompleteResult, LLMProvider } from '../src/llm/provider.js';
+import { buildPatchIndex } from '../src/review/filter.js';
 import { isLocalModel, stopLocalServers } from '../src/llm/local.js';
 import type { LLMFacade } from '../src/llm/registry.js';
-
-interface Fixture {
-  title: string;
-  body: string;
-  number: number;
-  headSha: string;
-  baseSha: string;
-  files: Array<{
-    filename: string;
-    status: ChangedFile['status'];
-    changes: number;
-    patch: string | null;
-  }>;
-}
+import { fetchFixture, loadFixture, runFixture, stubLLM, type Fixture } from './lib/fixture-review.js';
 
 /** Flags that consume the following argument. */
 const VALUE_FLAGS = new Set(['--config', '--pr', '--out']);
@@ -80,143 +61,6 @@ function positionalArg(args: string[]): string | undefined {
   return undefined;
 }
 
-/** Pull the parts of a PR we need, over the API, without checking anything out. */
-async function fetchFixture(ref: string): Promise<Fixture> {
-  const parsed = parsePrRef(ref);
-  if (!parsed) {
-    throw new Error(`Could not parse "${ref}". Use owner/repo#123 or a GitHub pull URL.`);
-  }
-
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
-  if (!token) {
-    throw new Error('Fetching a live pull request needs GITHUB_TOKEN (or GH_TOKEN).');
-  }
-
-  const { GitHubClient } = await import('../src/github/client.js');
-  const client = new GitHubClient(token, parsed.owner, parsed.repo);
-
-  const [pr, files] = await Promise.all([
-    client.getPullRequest(parsed.number),
-    client.getChangedFiles(parsed.number),
-  ]);
-
-  console.log(
-    `Fetched ${parsed.owner}/${parsed.repo}#${parsed.number}: "${pr.title}" (${files.length} file(s))`,
-  );
-
-  return {
-    title: pr.title,
-    body: pr.body,
-    number: pr.number,
-    headSha: pr.headSha,
-    baseSha: pr.baseSha,
-    files: files.map((f) => ({
-      filename: f.filename,
-      status: f.status,
-      changes: f.changes,
-      patch: f.patch,
-    })),
-  };
-}
-
-/** Deterministic fake reviewer: flags markers we can grep for. */
-class StubProvider implements LLMProvider {
-  readonly name = 'stub';
-  supports(): boolean {
-    return true;
-  }
-
-  async complete(req: CompleteRequest): Promise<CompleteResult> {
-    const isReduce = req.schema && 'walkthrough' in (req.schema as any).properties;
-    if (isReduce) {
-      // Pass through: reduce is exercised but does no useful work in stub mode.
-      // The reduce phase judges findings by id now, so the stub drops nothing.
-      const userText = req.messages.find((m) => m.role === 'user')?.content ?? '';
-      const findings = extractFindingsFromPrompt(userText);
-      return {
-        text: '',
-        parsed: {
-          walkthrough: `_Stub review._ Detected ${findings.length} candidate finding(s).`,
-          file_summaries: [],
-          drop: [],
-        },
-        usage: emptyUsage(),
-      };
-    }
-
-    const userText = req.messages.find((m) => m.role === 'user')?.content ?? '';
-    const fileMatch = /`([^`]+)`/.exec(userText);
-    const file = fileMatch?.[1] ?? 'unknown';
-    const findings = heuristicFindings(file, userText);
-    return {
-      text: '',
-      parsed: {
-        summary: `${findings.length} issue(s) detected by the stub reviewer.`,
-        findings: findings.map((f) => ({ ...f, start_line: f.startLine ?? null })),
-      },
-      usage: emptyUsage(),
-    };
-  }
-}
-
-/** Adapter so the pipeline can call the stub through the `LLM` facade shape. */
-const stubLLM: LLMFacade = {
-  complete: (_model: string, req: Omit<CompleteRequest, 'model'>) =>
-    new StubProvider().complete({ ...req, model: 'stub' }),
-  // The stub answers instantly, so it can take as many requests at once as the
-  // pipeline wants to give it.
-  concurrency: () => 6,
-};
-
-function heuristicFindings(file: string, annotated: string): Finding[] {
-  const out: Finding[] = [];
-  const lines = annotated.split('\n');
-  for (const raw of lines) {
-    // Annotation format: "  142 + content"
-    const m = /^\s*(\d+)\s\+\s(.*)$/.exec(raw);
-    if (!m) continue;
-    const line = Number(m[1]);
-    const content = m[2] ?? '';
-    if (/TODO|FIXME/.test(content)) {
-      out.push({
-        file,
-        line,
-        severity: 'minor',
-        category: 'maintainability',
-        title: 'Unresolved TODO',
-        body: 'This TODO should be tracked in an issue before merging.',
-        confidence: 0.7,
-      });
-    } else if (/console\.log\(/.test(content)) {
-      out.push({
-        file,
-        line,
-        severity: 'minor',
-        category: 'maintainability',
-        title: 'Stray console.log',
-        body: 'Remove debug logging before merging.',
-        // Comment it out rather than deleting, so the suggestion block has
-        // something visible to replace the line with.
-        suggestion: `// ${content.trim()}`,
-        confidence: 0.85,
-      });
-    }
-  }
-  return out;
-}
-
-function extractFindingsFromPrompt(userText: string): unknown[] {
-  // In stub mode the reduce prompt contains the JSON we produced in map.
-  const start = userText.indexOf('[');
-  const end = userText.lastIndexOf(']');
-  if (start === -1 || end === -1 || end <= start) return [];
-  try {
-    return JSON.parse(userText.slice(start, end + 1)) as unknown[];
-  } catch {
-    return [];
-  }
-}
-
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const fixturePath = positionalArg(args);
@@ -237,7 +81,7 @@ async function main(): Promise<void> {
 
   const fixture: Fixture = prRef
     ? await fetchFixture(prRef)
-    : (JSON.parse(readFileSync(resolve(fixturePath!), 'utf8')) as Fixture);
+    : loadFixture(resolve(fixturePath!));
 
   if (prRef && outPath) {
     writeFileSync(resolve(outPath), `${JSON.stringify(fixture, null, 2)}\n`, 'utf8');
@@ -248,29 +92,7 @@ async function main(): Promise<void> {
     ? parseConfig(readFileSync(resolve(configPath), 'utf8'))
     : loadConfig(process.cwd()).config;
 
-  const allFiles: ChangedFile[] = fixture.files.map((f) => ({
-    filename: f.filename,
-    status: f.status,
-    patch: f.patch,
-    changes: f.changes,
-  }));
-
-  // Apply the same pre-flight filtering the real Action does, so skipped
-  // files never reach the model (or the token budget).
-  const { selected, skipped } = selectFiles(allFiles, config);
-
-  const gathered: GatheredPr = {
-    title: fixture.title,
-    body: fixture.body,
-    headSha: fixture.headSha,
-    baseSha: fixture.baseSha,
-    number: fixture.number,
-    files: selected,
-    contexts: new Map(),
-    skipped,
-  };
-
-  let llm = stubLLM;
+  let llm: LLMFacade = stubLLM;
   let model = 'stub';
   if (!useStub) {
     // The environment wins over the repository's own config. The harness is
@@ -304,51 +126,39 @@ async function main(): Promise<void> {
     }
   }
 
+  const run = await runFixture(fixture, config, llm, model);
+
   console.log(`Source:  ${prRef ?? fixturePath}`);
-  console.log(`Files:   ${allFiles.length} total, ${selected.length} selected, ${skipped.length} skipped`);
-  for (const s of skipped) console.log(`         skip ${s.file} (${s.reason})`);
+  console.log(`Files:   ${run.allFiles.length} total, ${run.selected.length} selected, ${run.skipped.length} skipped`);
+  for (const s of run.skipped) console.log(`         skip ${s.file} (${s.reason})`);
   console.log(`Model:   ${model}${useStub ? ' (stub, offline)' : ''}\n`);
 
-  const analyses: FileAnalysis[] = await mapPhase(llm, model, gathered, config);
   console.log('--- MAP ---');
-  for (const a of analyses) {
+  for (const a of run.analyses) {
     console.log(`  ${a.file}: ${a.findings.length} finding(s) — ${a.summary || '(no summary)'}`);
   }
 
-  const reduced = await reducePhase(llm, model, {
-    prTitle: fixture.title,
-    prBody: fixture.body,
-    analyses,
-  });
-  console.log(`\n--- REDUCE ---\n  ${reduced.findings.length} finding(s) after reduce`);
+  console.log(`\n--- REDUCE ---\n  ${run.reduced.findings.length} finding(s) after reduce`);
 
-  const filtered = filterFindings(reduced.findings, {
-    config,
-    changedFiles: selected,
-    parsedByFile: buildPatchIndex(selected),
-    allPrFiles: allFiles.map((f) => f.filename),
-  });
+  const stats = run.filtered.stats;
   console.log('\n--- FILTER ---');
-  console.log(`  before: ${filtered.stats.before}  after: ${filtered.stats.after}`);
-  console.log(`  dropped: confidence=${filtered.stats.droppedConfidence} ` +
-    `out-of-hunk=${filtered.stats.droppedOutOfHunk} ` +
-    `filtered-path=${filtered.stats.droppedFilteredPath} ` +
-    `duplicate=${filtered.stats.droppedDuplicate} ` +
-    `cap=${filtered.stats.droppedCap} style=${filtered.stats.suppressedStyle} ` +
-    `prose-suggestion=${filtered.stats.strippedProseSuggestion}`);
-
-  const payload = buildReviewPayload({ ...reduced, findings: filtered.findings }, config, {
-    headSha: fixture.headSha,
-    skipped: gathered.skipped,
-  });
+  console.log(`  before: ${stats.before}  after: ${stats.after}`);
+  console.log(
+    `  dropped: confidence=${stats.droppedConfidence} ` +
+      `out-of-hunk=${stats.droppedOutOfHunk} ` +
+      `filtered-path=${stats.droppedFilteredPath} ` +
+      `duplicate=${stats.droppedDuplicate} ` +
+      `cap=${stats.droppedCap} style=${stats.suppressedStyle} ` +
+      `prose-suggestion=${stats.strippedProseSuggestion}`,
+  );
 
   console.log('\n--- PAYLOAD (would be posted) ---');
-  console.log(JSON.stringify(payload, null, 2));
+  console.log(JSON.stringify(run.payload, null, 2));
 
   // Sanity check: every comment must land on a line present in the diff.
-  const index = buildPatchIndex(selected);
+  const index = buildPatchIndex(run.selected);
   let bad = 0;
-  for (const c of payload.comments) {
+  for (const c of run.payload.comments) {
     const parsed = index.get(c.path);
     if (!parsed || !parsed.attachableNewLines.has(c.line)) {
       console.error(`  ✖ comment on ${c.path}:${c.line} is NOT in the diff`);
@@ -356,7 +166,7 @@ async function main(): Promise<void> {
     }
   }
   if (bad === 0) {
-    console.log(`\n✓ All ${payload.comments.length} comment(s) anchored to real diff lines.`);
+    console.log(`\n✓ All ${run.payload.comments.length} comment(s) anchored to real diff lines.`);
   } else {
     console.error(`\n✖ ${bad} comment(s) are not anchored to diff lines.`);
     process.exitCode = 1;

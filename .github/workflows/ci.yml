@@ -31,6 +31,13 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Eval harness self-check
+        # Offline and model-free: every case in evals/ must load, and the
+        # scorer must run end to end. A stub's numbers mean nothing — the real
+        # measurements come from the Quality eval workflow — but a broken case
+        # file or a scorer regression fails here, cheaply.
+        run: npm run eval:stub
+
       - name: Build bundle
         run: npm run build
 

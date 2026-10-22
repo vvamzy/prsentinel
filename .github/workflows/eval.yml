@@ -1,0 +1,118 @@
+name: Quality eval
+
+# Manual and slow, deliberately outside PR CI: it runs every labelled diff in
+# `evals/` through a real model and reports precision/recall.
+#
+# This is the only honest answer to "is the review any good?". Unit tests prove
+# the pipeline is wired correctly; they cannot tell you whether the bot says
+# true things. The model is stochastic and a free CPU runner takes minutes per
+# file, so the default is a bundled model (no key required) at 1.5B, which is
+# fast enough to run routinely and weak enough that a green run means the
+# harness works, not that the model is good.
+#
+# For the number that gates a release, run it with the cloud model you ship:
+#
+#   model: openai/gpt-4o-mini
+#
+# and set the `LLM_API_KEY` repository secret. Turn on `fail-under` thresholds
+# once you have a baseline you are willing to defend.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: >-
+          Model id. `local/…` runs a bundled GGUF on the runner and needs no key;
+          anything else uses the LLM_API_KEY secret.
+        required: false
+        default: local/qwen2.5-coder-1.5b-instruct
+      threads:
+        description: llama.cpp threads. A free public runner has 4 vCPU.
+        required: false
+        default: '4'
+      min-precision:
+        description: >-
+          Fail below this precision, e.g. 0.8. Leave empty to report only.
+        required: false
+        default: ''
+      min-recall:
+        description: Fail below this recall, e.g. 0.6. Leave empty to report only.
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    name: ${{ inputs.model }}
+    runs-on: ubuntu-latest
+    # Seven map calls and four reduce calls on CPU. A 7B can take 3 minutes per
+    # map call; the 1.5B finishes in a few minutes.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci --ignore-scripts
+
+      # The bundled model is a GGUF plus the llama.cpp server that loads it. The
+      # image ships the server; this job runs the harness from source, so it
+      # installs the same pinned build the Dockerfile pins.
+      - name: Install llama.cpp
+        if: startsWith(inputs.model, 'local/')
+        run: |
+          set -euo pipefail
+          build=b11731
+          curl -fsSL -o /tmp/llama.tar.gz \
+            "https://github.com/ggml-org/llama.cpp/releases/download/${build}/llama-${build}-bin-ubuntu-x64.tar.gz"
+          sudo mkdir -p /opt/llama
+          sudo tar -xzf /tmp/llama.tar.gz -C /opt/llama --strip-components=1
+          test -x /opt/llama/llama-server
+          # ggml dlopens its CPU backend from the binary's own directory, so the
+          # server stays next to its libraries rather than on PATH alone.
+          echo "PRSENTINEL_LLAMA_SERVER=/opt/llama/llama-server" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=/opt/llama" >> "$GITHUB_ENV"
+
+      # Shared with the smoke workflow on purpose: both want the same weights.
+      # ensureModel verifies size and sha256 on every run, so a stale cache is
+      # safe.
+      - name: Cache the model weights
+        if: startsWith(inputs.model, 'local/')
+        uses: actions/cache@v6
+        with:
+          path: .prsentinel/models
+          key: local-model-${{ inputs.model }}
+
+      - name: Run the eval
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          MODEL: ${{ inputs.model }}
+          THREADS: ${{ inputs.threads }}
+          MIN_PRECISION: ${{ inputs.min-precision }}
+          MIN_RECALL: ${{ inputs.min-recall }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          args=(--model "$MODEL" --json out/eval.json --markdown-file "$GITHUB_STEP_SUMMARY")
+          if [ -n "$MIN_PRECISION" ]; then args+=(--min-precision "$MIN_PRECISION"); fi
+          if [ -n "$MIN_RECALL" ]; then args+=(--min-recall "$MIN_RECALL"); fi
+          if [[ "$MODEL" == local/* ]]; then
+            export PRSENTINEL_LOCAL_THREADS="$THREADS"
+          fi
+          npx tsx scripts/eval.ts "${args[@]}" 2>&1 | tee eval.log
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: eval-report
+          path: |
+            out/eval.json
+            eval.log
+          if-no-files-found: warn

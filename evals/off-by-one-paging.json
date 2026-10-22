@@ -1,0 +1,46 @@
+{
+  "name": "off-by-one-paging",
+  "source": "hand-written",
+  "notes": "Array.prototype.slice takes an exclusive end, so the helper drops the last item of every page and returns pageSize-1 items. A reviewer that says nothing here has missed the whole PR.",
+  "pr": {
+    "title": "Add a pagination helper",
+    "body": "Shared helper for the list endpoints, so each one stops re-deriving page bounds by hand.",
+    "number": 102,
+    "headSha": "5555555555555555555555555555555555555555",
+    "baseSha": "6666666666666666666666666666666666666666",
+    "files": [
+      {
+        "filename": "src/paging.ts",
+        "status": "added",
+        "changes": 15,
+        "patch": "@@ -0,0 +1,15 @@\n+export interface Page<T> {\n+  items: T[];\n+  page: number;\n+  pageSize: number;\n+  total: number;\n+}\n+\n+/**\n+ * Slice one page out of a full result set. `page` is 1-based.\n+ */\n+export function paginate<T>(all: T[], page: number, pageSize: number): Page<T> {\n+  const start = (page - 1) * pageSize;\n+  const end = start + pageSize - 1;\n+  return { items: all.slice(start, end), page, pageSize, total: all.length };\n+}"
+      }
+    ]
+  },
+  "expect": [
+    {
+      "id": "exclusive-slice-end",
+      "path": "src/paging.ts",
+      "line": 14,
+      "tolerance": 2,
+      "match_any": [
+        "off-by-one",
+        "off by one",
+        "exclusive",
+        "last item",
+        "drops the last",
+        "one short",
+        "start + pageSize",
+        "start + pagesize"
+      ],
+      "why": "slice(start, end) excludes end, so end must be start + pageSize."
+    }
+  ],
+  "allow": [
+    {
+      "path": "src/paging.ts",
+      "match_any": ["no test", "not tested", "untested", "missing test", "add a test", "tests for"],
+      "why": "The fixture is a snippet; the repository has its tests elsewhere."
+    }
+  ]
+}

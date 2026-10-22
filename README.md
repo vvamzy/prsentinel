@@ -439,6 +439,24 @@ Two checks cover things the unit tests cannot. Both are documented in
   review with a bundled model and reports wall-clock time and payload size. This
   is the only measurement of what a bundled 7B actually costs on a free runner.
 
+Whether the review is any *good* is a separate question, and `npm run eval`
+answers it: it runs the labelled diffs in [`evals/`](evals/) through the real
+pipeline and reports precision, recall, and whether every comment landed on a
+line GitHub will accept.
+
+```bash
+npm run eval:stub                        # offline, harness self-check
+LLM_API_KEY=sk-... npm run eval          # the cloud model you ship
+LLM_MODEL=local/qwen2.5-coder-7b-instruct npm run eval
+```
+
+The suite is small and deliberately includes *clean* diffs, where the right
+answer is silence — inventing a problem is the failure mode that actually annoys
+people. No cloud-model score has been published yet; the numbers above are from
+the smoke test. Run it with your key to get your model's. The **Quality eval**
+workflow (manual dispatch) does the same thing on a runner, with thresholds to
+turn it into a gate.
+
 The test suite includes an end-to-end pipeline test with a stub LLM, so you can
 iterate on prompts and filtering without spending a cent.
 

@@ -157,6 +157,62 @@ line that genuinely exists in the diff. Treat a non-zero exit there as a bug,
 because it is: that is the failure that produces a 422 from GitHub, or worse, a
 comment on unrelated code.
 
+## Measuring quality
+
+`dev-review` tells you what the bot *would* post. It cannot tell you whether
+that is right. `scripts/eval.ts` can: it runs the same pipeline over labelled
+diffs and compares what was posted with what a human says is actually there.
+
+```bash
+npm run eval:stub                        # offline; proves the harness runs
+LLM_API_KEY=sk-... npm run eval          # the cloud model you ship
+LLM_MODEL=local/qwen2.5-coder-7b-instruct npm run eval
+```
+
+Per case it reports:
+
+- **precision** — of the comments posted, how many were true. A comment matching
+  nothing in the case counts against it, so noise on a clean diff shows up as
+  0%, not as a neutral blank.
+- **recall** — of the labelled issues, how many were found.
+- **anchoring** — whether each comment's line exists in the diff. This is never
+  allowed to fail: an unanchored comment is a 422, not a style issue.
+
+The text report also prints every false positive it saw, which is the useful
+part when a model is bad: it shows exactly what was invented.
+
+`--min-precision` and `--min-recall` turn the report into a gate; `--json` and
+`--markdown-file` make it usable from CI, which is what the **Quality eval**
+workflow does. That workflow is manual because a model run is slow and
+stochastic, and the thresholds are a policy choice, so they start empty.
+
+### Adding a case
+
+1. Save the diff:
+   `npm run dev:pr -- owner/repo#123 --out fixtures/pr-123.json` (API read,
+   no checkout).
+2. Read it and write down what is genuinely wrong. **The `match` terms describe
+   the problem, not the fix** — a model that explains the bug differently must
+   still score. Keep them short and hard to avoid: `off-by-one`, `unawaited`,
+   `sql injection`.
+3. Add `evals/<name>.json` with the fixture path, the expectations, and a
+   `notes` field saying why those are the right ones. Give the line number too,
+   so anchoring is scored.
+4. Run `npm run eval -- --only <name>` and sanity-check that the labels agree
+   with a model you trust.
+
+A clean change is a case as well, with `"expect": []`. Those are the most
+valuable ones: the observed failure mode is not missing bugs, it is inventing
+them, and on a diff that is genuinely fine every comment is a false positive.
+
+Use `allow` sparingly, and only for things the fixture cannot show — a missing
+test when the fixture is a snippet, say. An `allow` rule that matches a real bug
+is how a suite starts lying.
+
+The suite is small and mostly self-authored. Treat its numbers as a floor on
+confidence rather than a verdict, and add cases from your own repository: those
+are the ones that predict what your team will actually see.
+
 ## The container and the bundled model
 
 The Docker action is what users actually run, and two things about it cannot be

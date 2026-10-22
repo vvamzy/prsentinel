@@ -1,0 +1,48 @@
+{
+  "name": "fire-and-forget-webhook",
+  "source": "hand-written",
+  "notes": "sendWebhook() is not awaited and has no .catch(), so a failed delivery is marked delivered anyway and the rejection goes unhandled. The comment claims this is deliberate, which is the trap.",
+  "pr": {
+    "title": "Dispatch pending webhooks in a loop",
+    "body": "Adds a sweeper that marks webhooks delivered once they have been sent.",
+    "number": 103,
+    "headSha": "7777777777777777777777777777777777777777",
+    "baseSha": "8888888888888888888888888888888888888888",
+    "files": [
+      {
+        "filename": "src/webhooks/dispatch.ts",
+        "status": "added",
+        "changes": 15,
+        "patch": "@@ -0,0 +1,15 @@\n+import { db } from '../db';\n+import { sendWebhook } from './send';\n+\n+/** Deliver every webhook that has not been delivered yet. */\n+export async function dispatchPending(): Promise<number> {\n+  const pending = await db.webhooks.findMany({ where: { delivered: false } });\n+\n+  for (const hook of pending) {\n+    // Fire and forget: a slow endpoint must not stall the loop.\n+    sendWebhook(hook);\n+    await db.webhooks.update({ where: { id: hook.id }, data: { delivered: true } });\n+  }\n+\n+  return pending.length;\n+}"
+      }
+    ]
+  },
+  "expect": [
+    {
+      "id": "unawaited-delivery",
+      "path": "src/webhooks/dispatch.ts",
+      "line": 10,
+      "tolerance": 1,
+      "match_any": [
+        "not awaited",
+        "unawaited",
+        "missing await",
+        "await sendWebhook",
+        "unhandled rejection",
+        "rejection",
+        "swallow",
+        "loses the webhook",
+        "marked delivered",
+        "delivery failure"
+      ],
+      "why": "Without awaiting (or a .catch), a failed send is marked delivered and becomes an unhandled rejection."
+    }
+  ],
+  "allow": [
+    {
+      "path": "src/webhooks/dispatch.ts",
+      "match_any": ["no test", "not tested", "untested", "missing test", "add a test", "tests for"],
+      "why": "The fixture is a snippet; the repository has its tests elsewhere."
+    }
+  ]
+}

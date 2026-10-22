@@ -17,6 +17,8 @@
     "dev": "tsx src/index.ts",
     "dev:review": "tsx scripts/dev-review.ts",
     "dev:pr": "tsx scripts/dev-review.ts --pr",
+    "eval": "tsx scripts/eval.ts",
+    "eval:stub": "tsx scripts/eval.ts --stub",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

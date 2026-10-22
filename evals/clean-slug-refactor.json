@@ -1,0 +1,27 @@
+{
+  "name": "clean-slug-refactor",
+  "source": "hand-written",
+  "notes": "A correct extraction: one pure helper, the caller updated, a test added. The only right answer is silence.",
+  "pr": {
+    "title": "Extract slug() from cacheKey()",
+    "body": "Pulls the normalisation out of `cacheKey` so other callers can reuse it. No behaviour change.",
+    "number": 101,
+    "headSha": "1111111111111111111111111111111111111111",
+    "baseSha": "2222222222222222222222222222222222222222",
+    "files": [
+      {
+        "filename": "src/lib/slug.ts",
+        "status": "modified",
+        "changes": 11,
+        "patch": "@@ -1,3 +1,8 @@\n-export function cacheKey(parts: string[]): string {\n-  return parts.map((p) => p.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-')).join('/');\n-}\n+/** Lowercase, trim, and collapse every run of non-alphanumerics into \"-\". */\n+export function slug(value: string): string {\n+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');\n+}\n+\n+export function cacheKey(parts: string[]): string {\n+  return parts.map(slug).join('/');\n+}"
+      },
+      {
+        "filename": "src/lib/slug.test.ts",
+        "status": "added",
+        "changes": 13,
+        "patch": "@@ -0,0 +1,13 @@\n+import { describe, expect, it } from 'vitest';\n+import { cacheKey, slug } from './slug.js';\n+\n+describe('slug', () => {\n+  it('collapses runs of non-alphanumerics', () => {\n+    expect(slug('  Hello, World!  ')).toBe('hello-world');\n+  });\n+\n+  it('builds a stable cache key from its parts', () => {\n+    expect(cacheKey(['Feature Requests', 'v2'])).toBe('feature-requests/v2');\n+  });\n+});"
+      }
+    ]
+  },
+  "expect": []
+}

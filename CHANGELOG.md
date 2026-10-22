@@ -39,9 +39,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   larger-runner/GPU option, with the reasons each is not built yet.
 - **Live-PR harness**: `npm run dev:pr -- owner/repo#123` fetches a real pull
   request over the API and runs the full pipeline against a real model, with
-  `--out` saving it as a fixture so it can be re-run for free. This is the only
-  way to judge whether the *suggestions* are good, which the offline stub
-  harness cannot assess.
+  `--out` saving it as a fixture so it can be re-run for free.
+- **A quality eval harness** (`npm run eval`, `evals/`): runs the real pipeline
+  over labelled diffs and scores precision, recall, and anchoring per case, so
+  "is the review any good?" has a number instead of an anecdote. The suite
+  deliberately includes *clean* diffs where the right answer is silence, because
+  inventing a problem — not missing one — is the failure mode that annoys
+  people. Every false positive is printed with its file and line, so a bad run
+  is diagnosable. `--min-precision`/`--min-recall` make it a gate, and
+  `--json`/`--markdown-file` make it CI-shaped, which is what the manual
+  **Quality eval** workflow uses. `npm run eval:stub` runs the whole thing with
+  no model and no network, so the harness is covered by ordinary CI.
 - **`/resolve`**: resolves the review threads prsentinel opened, via the
   GraphQL thread node id that no REST endpoint exposes. Only threads *we*
   started are touched — a reviewer's thread we merely replied to is left alone —
@@ -99,8 +107,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **In-process cost controls**: files are filtered *before* any model call.
 - **Security guard** (`scripts/check-pr-target-safety.mjs`) that fails CI if a
   privileged workflow checks out PR head code.
-- **280 tests**, including an end-to-end pipeline test with a stub LLM and an
-  offline fixture harness (`npm run dev:review`).
+- **309 tests**, including an end-to-end pipeline test with a stub LLM, an
+  offline fixture harness (`npm run dev:review`), and unit tests for the eval
+  scorer — the instrument behind every quality number this project reports.
 - Docker container action, Apache-2.0 licensed.
 
 ### Changed
