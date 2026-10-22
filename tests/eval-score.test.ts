@@ -181,6 +181,29 @@ describe('scoreFindings', () => {
   it('defaults rawFindings to the filtered count', () => {
     const s = scoreFindings({ expectations: [], findings: [finding()] });
     expect(s.rawFindings).toBe(1);
+    expect(s.filter).toBeUndefined();
+  });
+
+  it('carries the filter counters, so a low comment count is explainable', () => {
+    // "0 posted" reads the same whether the model said nothing or the filter
+    // removed everything. The counters are what tell the two apart.
+    const s = scoreFindings({
+      expectations: [],
+      findings: [],
+      rawFindings: 3,
+      filter: {
+        droppedConfidence: 3,
+        droppedOutOfHunk: 0,
+        droppedFilteredPath: 0,
+        droppedDuplicate: 0,
+        droppedCap: 0,
+        suppressedStyle: 0,
+        strippedProseSuggestion: 0,
+      },
+    });
+    expect(s.rawFindings).toBe(3);
+    expect(s.findings).toBe(0);
+    expect(s.filter?.droppedConfidence).toBe(3);
   });
 });
 

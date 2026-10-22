@@ -90,6 +90,20 @@ export interface FixtureScore {
   unanchored: number;
   /** Suggestion blocks that are prose on a code file. Must be zero. */
   proseSuggestions: number;
+  /**
+   * Why the raw findings did not all become comments. Without this, "0 posted"
+   * is ambiguous: it reads the same whether the model said nothing or the
+   * deterministic filter removed everything it said.
+   */
+  filter?: {
+    droppedConfidence: number;
+    droppedOutOfHunk: number;
+    droppedFilteredPath: number;
+    droppedDuplicate: number;
+    droppedCap: number;
+    suppressedStyle: number;
+    strippedProseSuggestion: number;
+  };
   durationMs: number;
   inputTokens: number;
   outputTokens: number;
@@ -132,6 +146,8 @@ export function scoreFindings(input: {
   comments?: ReviewComment[];
   /** Suggestion blocks that are prose on a code file, after filtering. */
   proseSuggestions?: number;
+  /** The filter phase's drop counts, for explaining a low comment count. */
+  filter?: FixtureScore['filter'];
   durationMs?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -145,6 +161,7 @@ export function scoreFindings(input: {
     isAnchored,
     comments = [],
     proseSuggestions = 0,
+    filter,
     durationMs = 0,
     inputTokens = 0,
     outputTokens = 0,
@@ -205,6 +222,17 @@ export function scoreFindings(input: {
     misanchored,
     unanchored,
     proseSuggestions,
+    filter: filter
+      ? {
+          droppedConfidence: filter.droppedConfidence,
+          droppedOutOfHunk: filter.droppedOutOfHunk,
+          droppedFilteredPath: filter.droppedFilteredPath,
+          droppedDuplicate: filter.droppedDuplicate,
+          droppedCap: filter.droppedCap,
+          suppressedStyle: filter.suppressedStyle,
+          strippedProseSuggestion: filter.strippedProseSuggestion,
+        }
+      : undefined,
     durationMs,
     inputTokens,
     outputTokens,

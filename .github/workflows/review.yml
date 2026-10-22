@@ -1,23 +1,39 @@
 name: Reusable prsentinel review
 
-# A reusable workflow other repositories can call:
+# A reusable workflow other repositories can call, so a caller owns no YAML:
 #
 #   jobs:
 #     prsentinel:
 #       uses: vvamzy/prsentinel/.github/workflows/review.yml@main
 #       secrets:
 #         llm-api-key: ${{ secrets.LLM_API_KEY }}
+#
+#   # Bundled model: no key and no third party at all.
+#     prsentinel:
+#       uses: vvamzy/prsentinel/.github/workflows/review.yml@main
+#       with:
+#         llm-model: local/qwen2.5-coder-7b-instruct
+#
+# `llm-api-key` is optional because a `local/…` model is served by the action,
+# not by a provider. It used to be required, which made the bundled path
+# impossible to reach through this workflow.
+#
+# The action is referenced by its published ref rather than `./` on purpose. A
+# reusable workflow runs in the *caller's* checkout, so `uses: ./` would resolve
+# to the caller's repository — which has no action.yml — and every cross-repo
+# call would fail at the first step. Keep this ref in step with the README when
+# tagging a release.
 
 on:
   workflow_call:
     inputs:
       llm-model:
-        description: 'Model id, e.g. openai/gpt-4o-mini'
+        description: 'Model id, e.g. openai/gpt-4o-mini, or local/… for a bundled model'
         required: false
         type: string
         default: 'openai/gpt-4o-mini'
       llm-base-url:
-        description: 'Override the LLM API base URL'
+        description: 'Override the LLM API base URL (Ollama, vLLM, a gateway)'
         required: false
         type: string
         default: ''
@@ -28,8 +44,8 @@ on:
         default: '.'
     secrets:
       llm-api-key:
-        description: 'API key for the LLM provider'
-        required: true
+        description: 'API key for the LLM provider. Not needed for a `local/…` model or a base URL that needs no auth.'
+        required: false
       app-id:
         description: 'GitHub App id (recommended). With app-private-key, posts as <app>[bot].'
         required: false
@@ -47,14 +63,32 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    # The action reviews every file before it posts anything, so a large pull
+    # request on a slow cloud model is minutes, not seconds. A bundled model is
+    # slower still, and one file the model never finishes should not hold a
+    # runner for the six-hour default.
+    timeout-minutes: 60
     steps:
-      # Always the base branch — never the PR head. See docs/SECURITY.md.
+      # The caller's base branch — never the PR head. This is where
+      # `.prsentinel.yaml` comes from, and the config file decides which commands
+      # are allowed and which paths are reviewed, so a PR must not be able to
+      # edit it. See docs/SECURITY.md.
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
 
+      # A bundled model is 1–4 GB and the runner has no persistent disk.
+      # ensureModel re-verifies the SHA-256 on every run, so a stale or partial
+      # cache costs a download, never a wrong model.
+      - name: Cache the model weights
+        if: startsWith(inputs.llm-model, 'local/')
+        uses: actions/cache@v6
+        with:
+          path: .prsentinel/models
+          key: prsentinel-model-${{ inputs.llm-model }}
+
       - name: Run prsentinel
-        uses: ./
+        uses: vvamzy/prsentinel@main
         with:
           # The App wins when both are set; github-token is the fallback.
           app-id: ${{ secrets.app-id }}
@@ -65,3 +99,4 @@ jobs:
           llm-model: ${{ inputs.llm-model }}
           llm-base-url: ${{ inputs.llm-base-url }}
           config-path: ${{ inputs.config-path }}
+          local-model-cache: .prsentinel/models

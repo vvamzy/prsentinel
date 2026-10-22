@@ -178,6 +178,25 @@ function table(rows: string[][], align: Array<'l' | 'r'>): string {
 const HEADER = ['case', 'exp', 'met', 'exact', 'cmts', 'tp', 'dup', 'fp', 'prec', 'recall', 'notes'];
 const ALIGN: Array<'l' | 'r'> = ['l', 'r', 'r', 'r', 'r', 'r', 'r', 'r', 'r', 'r', 'l'];
 
+/** Filter counters that remove a finding entirely (unlike a stripped suggestion). */
+const DROP_KEYS = [
+  'droppedConfidence',
+  'droppedOutOfHunk',
+  'droppedFilteredPath',
+  'droppedDuplicate',
+  'droppedCap',
+  'suppressedStyle',
+] as const;
+
+const DROP_LABELS: Record<(typeof DROP_KEYS)[number], string> = {
+  droppedConfidence: 'below the confidence floor',
+  droppedOutOfHunk: 'outside the diff',
+  droppedFilteredPath: 'on a filtered path',
+  droppedDuplicate: 'duplicate',
+  droppedCap: 'over a cap',
+  suppressedStyle: 'style, and the repo lints',
+};
+
 function caseRow(s: FixtureScore): string[] {
   const defects: string[] = [];
   if (s.unanchored > 0) defects.push(`${s.unanchored} unanchored!`);
@@ -221,6 +240,18 @@ function printText(suite: SuiteScore): void {
       `${seconds(suite.durationMs)} wall clock`,
   );
   if (suite.allowed > 0) console.log(`  ${suite.allowed} comment(s) matched an explicit allow rule`);
+
+  // Why raw findings did not become comments. "0 posted" on its own cannot
+  // distinguish a silent model from an aggressive filter.
+  const filtered: string[] = [];
+  for (const s of suite.cases) {
+    if (!s.filter || s.rawFindings === s.findings) continue;
+    const reasons = DROP_KEYS.filter((k) => s.filter![k] > 0).map(
+      (k) => `${s.filter![k]} ${DROP_LABELS[k]}`,
+    );
+    filtered.push(`  ${s.name}: ${s.rawFindings} raw → ${s.findings} posted (${reasons.join(', ')})`);
+  }
+  if (filtered.length > 0) console.log(`\nFiltered out:\n${filtered.join('\n')}`);
 
   const details: string[] = [];
   for (const s of suite.cases) {
@@ -394,6 +425,7 @@ async function main(): Promise<void> {
         comments: run.payload.comments,
         isAnchored,
         proseSuggestions,
+        filter: run.filtered.stats,
         durationMs: elapsed,
         inputTokens: usage.input + run.reduced.usage.input,
         outputTokens: usage.output + run.reduced.usage.output,

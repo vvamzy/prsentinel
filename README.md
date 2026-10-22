@@ -81,6 +81,37 @@ and add `APP_ID` and `APP_PRIVATE_KEY`. That is the whole setup.
 > write-scoped token — and therefore must never execute PR code. prsentinel
 > reads the diff as data through the API only.
 
+### Or call the reusable workflow
+
+You can skip the YAML above and call the workflow in this repository instead.
+It checks out your base branch, caches the bundled model's weights, and runs the
+action with the same guarantees:
+
+```yaml
+name: prsentinel
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    uses: vvamzy/prsentinel/.github/workflows/review.yml@main
+    secrets:
+      llm-api-key: ${{ secrets.LLM_API_KEY }}
+      # Optional: post as <your-app>[bot].
+      app-id: ${{ secrets.APP_ID }}
+      app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
+```
+
+Add `with: { llm-model: local/qwen2.5-coder-7b-instruct }` to run a bundled
+model and skip the key entirely — `llm-api-key` is optional here for exactly
+that reason.
+
 ### Register the GitHub App
 
 The App is what gives prsentinel its own identity: it posts as `your-app[bot]`

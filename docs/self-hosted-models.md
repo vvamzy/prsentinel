@@ -109,17 +109,18 @@ request's code: it reads the diff through the API as data, which is what the
 A hosted provider is built to be fanned out to, from anywhere, for as long as it
 takes. A box in your office is not:
 
-- **A slow first token is a timeout.** prsentinel streams responses from a
-  loopback endpoint so the connection stays alive, but a *remote* one gets the
-  ordinary request path: Node abandons a request whose response headers have not
-  arrived within 300 seconds. A GPU answers in a second or two; a CPU box with a
-  large model may not. If that bites, put the runner on the same machine and use
+- **A slow response is a timeout.** prsentinel streams responses from a loopback
+  endpoint so the connection stays alive; a *remote* one gets the ordinary
+  request path, and Node abandons a request that has not produced a response
+  within 300 seconds. A GPU answers long before that; a CPU box with a large
+  model may not. If it bites, put the runner on the same machine and use
   `http://127.0.0.1:11434/v1`, which is also the path that streams.
 - **Concurrency is yours to size.** prsentinel sends up to 6 file reviews at
   once to a remote endpoint. Ollama serves one request at a time by default and
-  queues the rest, which looks like a stall rather than an error. Raise
-  `OLLAMA_NUM_PARALLEL` (it needs the VRAM for the extra KV caches), or keep
-  pull requests small with `reviews.max_files`.
+  queues the rest, which looks like a stall rather than an error. Set
+  `OLLAMA_NUM_PARALLEL` to what your GPU can actually hold — often two or four —
+  and keep pull requests small with `reviews.max_files`. A request that queues
+  for longer than the timeout above is abandoned, and that file goes unreviewed.
 - **Every model is not a reviewer.** The pipeline needs a model that follows a
   JSON schema and writes code, not just one that chats. Code-tuned models in the
   7B–32B range are the sweet spot; a 70B general model is usually worse at this

@@ -193,6 +193,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   fast pass that only proves the pipeline still runs.
 
 ### Fixed
+- **The reusable workflow could not be called from another repository.** It ran
+  the action as `uses: ./`, which resolves against the *caller's* checkout —
+  where there is no `action.yml` — so every cross-repository call failed at its
+  first step. It now references the published action, and `llm-api-key` is
+  optional (it was required, which made the bundled model unreachable through
+  this workflow entirely). The model weights are cached and the job has a
+  timeout, so one file the model never finishes cannot hold a runner for six
+  hours.
 - **A keyless self-hosted endpoint no longer demands a dummy key.** Setting
   `llm-base-url` — Ollama, vLLM, an internal gateway — means the endpoint is
   yours, and those are routinely served with no auth at all. The run used to
