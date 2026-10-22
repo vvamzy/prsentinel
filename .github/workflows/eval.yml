@@ -14,8 +14,13 @@ name: Quality eval
 #
 #   model: openai/gpt-4o-mini
 #
-# and set the `LLM_API_KEY` repository secret. Turn on `fail-under` thresholds
-# once you have a baseline you are willing to defend.
+# and set the `LLM_API_KEY` repository secret. Or turn on `github-models` and
+# use `model: github/gpt-4o-mini`: the same model, served by GitHub's free
+# tier, reached with the workflow's own token and no secret at all. That path
+# exists because a quality number nobody can reproduce is not a number.
+#
+# Turn on `fail-under` thresholds once you have a baseline you are willing to
+# defend.
 
 on:
   workflow_dispatch:
@@ -30,6 +35,22 @@ on:
         description: llama.cpp threads. A free public runner has 4 vCPU.
         required: false
         default: '4'
+      base-url:
+        description: 'Override the LLM API base URL (Ollama, vLLM, a gateway).'
+        required: false
+        default: ''
+      github-models:
+        description: >-
+          Use GitHub Models with the workflow's own token instead of LLM_API_KEY.
+          Free tier, and it serves openai/gpt-4o-mini, the model this action
+          defaults to. Only works for models in the GitHub Models catalogue.
+        required: false
+        default: false
+        type: boolean
+      only:
+        description: 'Run one case by name, e.g. off-by-one-paging. Empty runs all.'
+        required: false
+        default: ''
       min-precision:
         description: >-
           Fail below this precision, e.g. 0.8. Leave empty to report only.
@@ -42,6 +63,9 @@ on:
 
 permissions:
   contents: read
+  # GitHub Models is reached with the workflow's own token when the
+  # `github-models` input is on. Without this the request is refused.
+  models: read
 
 jobs:
   eval:
@@ -91,17 +115,20 @@ jobs:
 
       - name: Run the eval
         env:
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_KEY: ${{ inputs.github-models && github.token || secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ inputs.base-url }}
           MODEL: ${{ inputs.model }}
           THREADS: ${{ inputs.threads }}
           MIN_PRECISION: ${{ inputs.min-precision }}
           MIN_RECALL: ${{ inputs.min-recall }}
+          ONLY: ${{ inputs.only }}
         run: |
           set -euo pipefail
           mkdir -p out
           args=(--model "$MODEL" --json out/eval.json --markdown-file "$GITHUB_STEP_SUMMARY")
           if [ -n "$MIN_PRECISION" ]; then args+=(--min-precision "$MIN_PRECISION"); fi
           if [ -n "$MIN_RECALL" ]; then args+=(--min-recall "$MIN_RECALL"); fi
+          if [ -n "$ONLY" ]; then args+=(--only "$ONLY"); fi
           if [[ "$MODEL" == local/* ]]; then
             export PRSENTINEL_LOCAL_THREADS="$THREADS"
           fi
