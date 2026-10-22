@@ -50,15 +50,6 @@
         "tests for"
       ],
       "why": "The fixture is a snippet; the repository has its tests elsewhere."
-    },
-    {
-      "path": "src/orders/submit.ts",
-      "match_any": [
-        "magic number",
-        "2 ** attempt",
-        "backoff constant"
-      ],
-      "why": "The backoff constant is visible in the diff and not the point of the review."
     }
   ]
 }

@@ -49,7 +49,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   is diagnosable. `--min-precision`/`--min-recall` make it a gate, and
   `--json`/`--markdown-file` make it CI-shaped, which is what the manual
   **Quality eval** workflow uses. `npm run eval:stub` runs the whole thing with
-  no model and no network, so the harness is covered by ordinary CI.
+  no model and no network, so the harness is covered by ordinary CI. Six labelled
+  cases: two clean diffs, an off-by-one, an unawaited dispatch, a filename
+  traversal, and a non-idempotent retry.
+- **`docs/RELEASING.md`**: what a release actually is here — promote `dev` to
+  `main` with a merge commit, tag, flip every install example to the new ref,
+  back-merge. It exists because a tag on its own leaves the README running one
+  ref and the reusable workflow another.
 - **A self-hosted inference guide**
   ([docs/self-hosted-models.md](docs/self-hosted-models.md)): Ollama and vLLM
   set-ups, TLS, an internal-only endpoint, and the two ways your own server
