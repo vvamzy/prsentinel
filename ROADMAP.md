@@ -3,34 +3,35 @@
 Things that are understood, decided, and deliberately not built yet. Each entry
 records *why* it was deferred, so a future reader does not have to re-derive it.
 
-## Hosted models that need no key at all
+## Self-hosted inference servers
 
 `llm-model: local/…` runs a GGUF on the Actions runner. It is genuinely private
 — no code leaves the job — but it is the slowest and weakest option, because the
 free runner has 4 vCPU and no GPU.
 
-The obvious improvement is a **self-hosted inference server**: you keep one
-Ollama or vLLM process warm on your own hardware, and prsentinel points at it.
+The stronger no-third-party option is a **self-hosted inference server**: one
+Ollama or vLLM process kept warm on your own hardware, with prsentinel pointing
+at it.
 
 ```yaml
-llm-model: ollama/qwen2.5-coder
+llm-model: ollama/qwen2.5-coder:14b
 llm-base-url: http://your-gpu-host:11434/v1
 ```
 
-This already works today — the provider is OpenAI-compatible and `llm-base-url`
-routes to it. What is missing is the *documentation*: it is currently buried in
-the provider list, and the README once implied prsentinel itself was the model
-server, which is not true and caused a real misunderstanding.
+That works today, and it is documented now: see
+[docs/self-hosted-models.md](docs/self-hosted-models.md) for a warm server, TLS,
+an internal-only endpoint, sizing concurrency, and the tradeoff against a cloud
+key. The README also says plainly that prsentinel is the *bot* and the model is
+something you point it at — an earlier version implied prsentinel was the server,
+which caused a real misunderstanding.
 
 **To do**
 
-- [ ] A "Run the model on your own hardware" guide covering a warm server,
-      TLS, an internal-only endpoint, and the tradeoff against a cloud key.
-- [ ] Say plainly in the README that prsentinel is the *bot*, and the model is
-      something you point it at.
 - [ ] Consider a `cache` action input so the bundled-model path can restore
       weights automatically instead of relying on a hand-written
       `actions/cache` step.
+- [ ] An `llm-concurrency` input. A remote server often has fewer slots than the
+      default of six in flight, and today the only fix is to edit code.
 
 ## Bigger runners, if this ever moves to an organisation
 

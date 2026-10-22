@@ -50,6 +50,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `--json`/`--markdown-file` make it CI-shaped, which is what the manual
   **Quality eval** workflow uses. `npm run eval:stub` runs the whole thing with
   no model and no network, so the harness is covered by ordinary CI.
+- **A self-hosted inference guide**
+  ([docs/self-hosted-models.md](docs/self-hosted-models.md)): Ollama and vLLM
+  set-ups, TLS, an internal-only endpoint, and the two ways your own server
+  differs from a hosted API — concurrency, and the 300-second first-token
+  timeout on a non-loopback URL. It also says plainly that prsentinel is the
+  bot, and the model is something you point it at.
 - **`/resolve`**: resolves the review threads prsentinel opened, via the
   GraphQL thread node id that no REST endpoint exposes. Only threads *we*
   started are touched — a reviewer's thread we merely replied to is left alone —
@@ -187,6 +193,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   fast pass that only proves the pipeline still runs.
 
 ### Fixed
+- **A keyless self-hosted endpoint no longer demands a dummy key.** Setting
+  `llm-base-url` — Ollama, vLLM, an internal gateway — means the endpoint is
+  yours, and those are routinely served with no auth at all. The run used to
+  fail with "No LLM API key configured" until you pasted an invented string into
+  a secret. An empty key now also omits the `Authorization` header instead of
+  sending a malformed `Bearer `, which a strict gateway would reject.
 - **A review posted `null` as the suggested change.** Asked to leave a
   suggestion out, the bundled 7B wrote the *string* `"null"`, and the parser
   took any non-null value as code — so the review offered the reader a change

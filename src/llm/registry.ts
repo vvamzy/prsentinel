@@ -1,6 +1,7 @@
 import type { CompleteRequest, CompleteResult, LLMProvider } from './provider.js';
 import { OpenAICompatProvider } from './openai.js';
 import { AnthropicProvider } from './anthropic.js';
+import { isLocalModel } from './local.js';
 
 /**
  * Resolves a model string like `anthropic/claude-sonnet` or `openai/gpt-4o`
@@ -157,4 +158,21 @@ export function isLoopbackUrl(url: string): boolean {
 export function modelProvider(model: string): string {
   const slash = model.indexOf('/');
   return slash === -1 ? 'openai' : model.slice(0, slash);
+}
+
+/**
+ * Does this configuration need an API key at all?
+ *
+ * Two kinds of setup do not. A bundled `local/…` model is served by prsentinel
+ * itself, and a base URL you own — Ollama and vLLM are routinely run with no
+ * auth at all — is reachable without one. Requiring a dummy key for those only
+ * taught people to paste `ollama` into a secret, which hides the real question
+ * of whether the endpoint is protected.
+ *
+ * Everything else does, including GitHub Models, where the key is the workflow
+ * token rather than a provider secret.
+ */
+export function needsApiKey(model: string, baseUrl?: string): boolean {
+  if (isLocalModel(model)) return false;
+  return (baseUrl ?? '').trim() === '';
 }

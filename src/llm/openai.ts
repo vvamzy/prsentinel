@@ -123,7 +123,10 @@ export class OpenAICompatProvider implements LLMProvider {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          authorization: `Bearer ${this.apiKey}`,
+          // A self-hosted server (Ollama, vLLM) is often served with no auth at
+          // all. Sending `Bearer ` with an empty key is a malformed header that
+          // a strict gateway will reject, so it is omitted instead.
+          ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
           ...this.extraHeaders,
         },
         body: JSON.stringify(body),

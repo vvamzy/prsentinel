@@ -9,7 +9,7 @@ import { log } from './log.js';
 import { GitHubClient, resolveRepoContext } from './github/client.js';
 import { resolveAuth, hasAnyCredentials, type AuthInputs } from './github/auth.js';
 import { serializePayload } from './github/review.js';
-import { LLM, type LLMFacade } from './llm/registry.js';
+import { LLM, needsApiKey, type LLMFacade } from './llm/registry.js';
 import {
   isLocalModel,
   ensureLocalServer,
@@ -78,11 +78,6 @@ async function makeLlm(env: RunEnv, model: string): Promise<LLM> {
     apiKey: env.llmKey,
     ...(env.llmBaseUrl ? { baseUrl: env.llmBaseUrl } : {}),
   });
-}
-
-/** A local model needs no key, so the "no LLM key" check must not fire for it. */
-function needsApiKey(model: string): boolean {
-  return !isLocalModel(model);
 }
 
 /** Collect credential inputs for `resolveAuth`, resolving owner/repo. */
@@ -354,9 +349,10 @@ async function main(): Promise<void> {
   }
 
   const model = reviewModel(config, env);
-  if (needsApiKey(model) && env.llmKey === '' && !env.dryRun) {
+  if (needsApiKey(model, env.llmBaseUrl) && env.llmKey === '' && !env.dryRun) {
     core.setFailed(
       'No LLM API key configured. Set the llm-api-key input or LLM_API_KEY secret, ' +
+        'point llm-base-url at a server that needs no key (Ollama, vLLM), ' +
         `or pick a bundled model such as \`local/${DEFAULT_LOCAL_MODEL}\`.`,
     );
     return;

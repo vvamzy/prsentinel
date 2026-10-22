@@ -5,6 +5,7 @@ import {
   LLM,
   isLoopbackUrl,
   modelProvider,
+  needsApiKey,
   resolveProvider,
 } from '../src/llm/registry.js';
 import { OpenAICompatProvider } from '../src/llm/openai.js';
@@ -144,6 +145,25 @@ describe('modelProvider', () => {
   });
 });
 
+describe('needsApiKey', () => {
+  it('does not need one for a bundled model', () => {
+    expect(needsApiKey('local/qwen2.5-coder-7b-instruct')).toBe(false);
+  });
+
+  it('does not need one for a base URL you own', () => {
+    expect(needsApiKey('ollama/qwen2.5-coder', 'http://gpu-box:11434/v1')).toBe(false);
+    // A blank setting is not a configured endpoint.
+    expect(needsApiKey('ollama/qwen2.5-coder', '   ')).toBe(true);
+    expect(needsApiKey('ollama/qwen2.5-coder', '')).toBe(true);
+  });
+
+  it('needs one for a hosted provider', () => {
+    expect(needsApiKey('openai/gpt-4o-mini')).toBe(true);
+    expect(needsApiKey('github/gpt-4o-mini')).toBe(true);
+    expect(needsApiKey('gpt-4o-mini')).toBe(true);
+  });
+});
+
 /** Build an OpenAI-style SSE body from a list of frames. */
 function eventStream(frames: string[]): string {
   return frames.join('');
@@ -166,6 +186,18 @@ describe('OpenAICompatProvider', () => {
       return respond(bodies.length);
     });
     return bodies;
+  }
+
+  /** Capture the headers of the one request the provider makes. */
+  async function captureHeaders(apiKey: string): Promise<Record<string, string>> {
+    let headers: Record<string, string> = {};
+    vi.stubGlobal('fetch', async (_url: string, init: { headers?: Record<string, string> }) => {
+      headers = init.headers ?? {};
+      return new Response('{}', { status: 200 });
+    });
+    const provider = new OpenAICompatProvider(apiKey, 'http://gpu-box:11434/v1');
+    await provider.complete({ model: 'm', messages: [] });
+    return headers;
   }
 
   it('reads a single JSON body', async () => {
@@ -193,6 +225,19 @@ describe('OpenAICompatProvider', () => {
     const provider = new OpenAICompatProvider('k', 'http://127.0.0.1:8080/v1');
     await provider.complete({ model: 'm', messages: [] });
     expect(bodies[0]?.stream).toBeUndefined();
+  });
+
+  it('sends the key as a bearer token', async () => {
+    const headers = await captureHeaders('sk-test');
+    expect(headers.authorization).toBe('Bearer sk-test');
+  });
+
+  it('omits Authorization when the server needs no key', async () => {
+    // Ollama and vLLM are routinely unauthenticated. `Bearer ` with an empty
+    // key is a malformed header, so it must not be sent at all.
+    const headers = await captureHeaders('');
+    expect(headers.authorization).toBeUndefined();
+    expect(headers['content-type']).toBe('application/json');
   });
 
   it('asks for a stream, and accumulates the deltas', async () => {

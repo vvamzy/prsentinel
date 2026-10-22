@@ -133,6 +133,12 @@ model on your own hardware — the model stays warm, and you can use something
 much larger than a runner could hold. prsentinel is the *bot*; the model is
 something you point it at.
 
+The `ollama/` prefix alone only gets you to `localhost`, so a remote server
+always needs `llm-base-url`. See
+**[docs/self-hosted-models.md](docs/self-hosted-models.md)** for a walkthrough:
+Ollama and vLLM set-up, TLS, an internal-only endpoint, and the two ways a
+self-hosted server differs from a hosted one (concurrency, first-token timeout).
+
 `llm-model` is a workflow input. In `.prsentinel.yaml` the equivalent is
 `models.review`, and the config file wins; prsentinel warns when the two
 disagree.
